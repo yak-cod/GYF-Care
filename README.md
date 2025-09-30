@@ -13,7 +13,7 @@ Aplicación de demo para asignación inteligente de pacientes a hospitales usand
 - `presentation/ui_graph.py` — pestaña del grafo.
 - `presentation/ui_assignment.py` — pestaña de asignación (interactiva).
 - `shared/config.py` — constantes de configuración.
-- `data/` — tus CSV (`pacientes.csv`, `hospitales.csv`).
+- `data/` — (`pacientes.csv`, `hospitales.csv`).
 
 ## Requisitos (ejemplo)
 
@@ -30,4 +30,5 @@ Aplicación de demo para asignación inteligente de pacientes a hospitales usand
 `pip install -r requirements.txt`
 
 ## Run:
+
 `streamlit run streamlit_app.py`

@@ -10,7 +10,7 @@ st.title("🏥 GYF-Care - Gestión de Asignación de Pacientes")
 # Cargar datos iniciales
 # ------------------------
 if "pacientes_df" not in st.session_state or "hosp_state" not in st.session_state:
-    pacientes_df, hosp_state = cargar_datos("data/pacientes.csv", "data/hospitales.csv")
+    pacientes_df, hosp_state = cargar_datos("data/pacientes.csv", "data/hospitalesprueba.csv")
     st.session_state["pacientes_df"] = pacientes_df
     st.session_state["hosp_state"] = hosp_state
 

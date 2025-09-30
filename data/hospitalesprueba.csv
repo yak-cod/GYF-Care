@@ -1,0 +1,11 @@
+ID_Hospital,Nombre,Capacidad_Camas,Camas_UCI,Distrito,Latitud,Longitud
+H001,Hospital_A,15,0,Miraflores,-12.122, -77.030
+H002,Hospital_B,10,0,La Molina,-12.090, -76.950
+H003,Hospital_C,25,0,Ate,-12.015, -76.975
+H004,Hospital_D,8,0,Independencia,-11.985, -77.060
+H005,Hospital_E,12,0,Villa El Salvador,-12.150, -76.980
+H006,Hospital_F,20,0,Comas,-11.950, -77.040
+H007,Hospital_G,30,0,San Juan de Lurigancho,-12.035, -76.990
+H008,Hospital_H,18,5,San Miguel,-12.080, -77.100
+H009,Hospital_I,5,0,Chorrillos,-12.190, -77.020
+H010,Hospital_J,40,0,Callao,-12.050, -77.150

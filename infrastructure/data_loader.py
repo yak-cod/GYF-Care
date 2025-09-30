@@ -2,12 +2,9 @@ from typing import Tuple
 import pandas as pd
 import streamlit as st
 
-
-@st.cache_data
-def cargar_datos(
-    pacientes_path: str = "data/pacientes.csv",
-    hospitales_path: str = "data/hospitales.csv",
-) -> Tuple[pd.DataFrame, pd.DataFrame]:
+# cambiar a en streamlit_app.py "data/hospitalesprueba.csv" de prueba para tener una muestra mas pequeña y sea más real el resultado
+@st.cache_data 
+def cargar_datos(pacientes_path, hospitales_path) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
     Carga pacientes y hospitales desde CSV. Normaliza nombres de columnas.
     Retorna (pacientes_df, hospitales_df).
