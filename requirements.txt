@@ -1,0 +1,19 @@
+# Core
+streamlit>=1.38.0
+pandas>=2.2.0
+numpy>=1.26.0
+
+# Mapas y visualización
+folium>=0.15.1
+streamlit-folium>=0.20.0
+branca>=0.7.0
+geopandas>=0.14.3
+
+# Clustering y análisis espacial
+scikit-learn>=1.5.0
+
+# Utils
+requests>=2.31.0
+
+# (Opcional) para manejar coordenadas y distancias geográficas
+geopy>=2.4.1
