@@ -133,5 +133,5 @@ def show_assignment(pacientes_df: pd.DataFrame, hosp_state: pd.DataFrame):
     # Estado actual de hospitales (tabla)
     st.markdown("**Estado actual de hospitales (capacidad restante)**")
     st.dataframe(
-        st.session_state.hosp_state[["ID_Hospital", "Nombre", "Capacidad_Camas", "Camas_UCI", "Distrito"]].reset_index(drop=True)
+        st.session_state.hosp_state[["ID_Hospital", "Nombre", "Capacidad_Camas", "Camas_UCI", "Departamento"]].reset_index(drop=True)
     )
