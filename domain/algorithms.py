@@ -1,3 +1,4 @@
+# domain\algorithms.py
 from typing import List, Tuple, Optional
 import pandas as pd
 import networkx as nx
@@ -140,3 +141,76 @@ def asignacion_min_cost_flow(pacientes_df: pd.DataFrame, hospitales_df: pd.DataF
         return pd.DataFrame(asignaciones, columns=["ID_Paciente", "ID_Hospital", "dist_km"]), None
     except Exception as e:
         return pd.DataFrame([], columns=["ID_Paciente", "ID_Hospital", "dist_km"]), str(e)
+
+
+def hospital_tiene_especialidad(hospital_row: pd.Series, especialidad_requerida: str) -> bool:
+    """
+    Verifica si un hospital tiene la especialidad requerida.
+    
+    Args:
+        hospital_row: Fila del DataFrame de hospitales
+        especialidad_requerida: Especialidad a buscar (ej: "Cardiología")
+        
+    Returns:
+        True si el hospital tiene la especialidad
+    """
+    if "Especialidades" not in hospital_row or pd.isna(hospital_row["Especialidades"]):
+        return False
+    
+    especialidades = str(hospital_row["Especialidades"]).lower()
+    return especialidad_requerida.lower() in especialidades
+
+
+def filtrar_hospitales_por_especialidad(
+    hospitales_df: pd.DataFrame, 
+    especialidad: str,
+    requiere_camas: bool = True
+) -> pd.DataFrame:
+    """
+    Filtra hospitales que tienen una especialidad específica.
+    
+    Args:
+        hospitales_df: DataFrame de hospitales
+        especialidad: Especialidad requerida
+        requiere_camas: Si True, solo retorna hospitales con camas disponibles
+        
+    Returns:
+        DataFrame filtrado
+    """
+    if especialidad == "" or especialidad.lower() == "ninguna":
+        return hospitales_df.copy()
+    
+    filtrados = hospitales_df[
+        hospitales_df.apply(lambda row: hospital_tiene_especialidad(row, especialidad), axis=1)
+    ].copy()
+    
+    if requiere_camas:
+        filtrados = filtrados[filtrados["Capacidad_Camas"] > 0]
+    
+    return filtrados
+
+
+def encontrar_hospitales_disponibles_con_especialidad(
+    hospitales_df: pd.DataFrame,
+    departamento: str,
+    especialidad: str
+) -> pd.DataFrame:
+    """
+    Encuentra hospitales disponibles con especialidad en un departamento.
+    
+    Args:
+        hospitales_df: DataFrame de hospitales
+        departamento: Departamento a filtrar
+        especialidad: Especialidad requerida
+        
+    Returns:
+        DataFrame de hospitales que cumplen criterios
+    """
+    # Filtrar por departamento
+    if "Departamento" in hospitales_df.columns:
+        hosp_dept = hospitales_df[hospitales_df["Departamento"] == departamento].copy()
+    else:
+        hosp_dept = hospitales_df.copy()
+    
+    # Filtrar por especialidad y disponibilidad
+    return filtrar_hospitales_por_especialidad(hosp_dept, especialidad, requiere_camas=True)
