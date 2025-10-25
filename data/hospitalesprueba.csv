@@ -1,11 +1,21 @@
-ID_Hospital,Nombre,Capacidad_Camas,Camas_UCI,Distrito,Latitud,Longitud
-H001,Hospital_A,15,0,Miraflores,-12.122, -77.030
-H002,Hospital_B,10,0,La Molina,-12.090, -76.950
-H003,Hospital_C,25,0,Ate,-12.015, -76.975
-H004,Hospital_D,8,0,Independencia,-11.985, -77.060
-H005,Hospital_E,12,0,Villa El Salvador,-12.150, -76.980
-H006,Hospital_F,20,0,Comas,-11.950, -77.040
-H007,Hospital_G,30,0,San Juan de Lurigancho,-12.035, -76.990
-H008,Hospital_H,18,5,San Miguel,-12.080, -77.100
-H009,Hospital_I,5,0,Chorrillos,-12.190, -77.020
-H010,Hospital_J,40,0,Callao,-12.050, -77.150
+ID_Hospital,Nombre,Departamento,Latitud,Longitud,Nivel,Especialidades,Capacidad_Camas,Camas_UCI,Camas_Disponibles,Camas_UCI_Disponibles
+H001,Hospital Regional Cusco,Cusco,-13.5167,-71.9833,3,Medicina Interna; Cirugía General; Cardiología; Traumatología; UCI; Emergencias,1,0,0,0
+H002,Hospital San Juan De Dios Ayacucho,Ayacucho,-13.1667,-74.2167,2,Medicina Interna; Cirugía General; Pediatría; Gineco-Obstetricia,40,5,20,2
+H003,Hospital Daniel Alcides Carrión Huancayo,Junín,-12.0667,-75.2000,3,Medicina Interna; Cardiología; Neurología; Traumatología; UCI; Nefrología,60,15,35,8
+H004,Hospital Regional Huancavelica,Huancavelica,-12.7833,-74.9833,2,Medicina Interna; Cirugía General; Gineco-Obstetricia; Pediatría,35,8,15,3
+H005,Hospital Apoyo Abancay,Apurímac,-13.6333,-73.3667,2,Medicina Interna; Cirugía General; Pediatría,30,5,10,2
+H006,Hospital Regional Puno,Puno,-15.8333,-70.0333,3,Medicina Interna; Cardiología; Neurología; Traumatología; UCI; Pediatría,55,12,25,6
+H007,Hospital Goyeneche Arequipa,Arequipa,-16.4090,-71.5375,3,Medicina Interna; Cirugía General; Cardiología; Neurología; Traumatología; UCI; Nefrología; Gineco-Obstetricia,70,20,40,10
+H008,Hospital Regional Cajamarca,Cajamarca,-7.1500,-78.5167,2,Medicina Interna; Cirugía General; Traumatología; Pediatría,45,8,25,4
+H009,Hospital Víctor Ramos Guardia Huaraz,Áncash,-9.5333,-77.5167,2,Medicina Interna; Traumatología; Cirugía General; Pediatría,38,6,18,3
+H010,Hospital Regional Moquegua,Moquegua,-17.1833,-70.9333,2,Medicina Interna; Cirugía General; Pediatría,28,4,12,2
+H011,Clínica Pardo Cusco,Cusco,-13.5200,-71.9700,3,Cardiología; Cirugía General; Traumatología; UCI,0,0,0,0
+H012,Hospital Amazónico Tarapoto,San Martín,-6.4833,-76.3667,2,Medicina Interna; Cirugía General; Pediatría; Traumatología,32,5,0,0
+H013,Hospital Regional Huánuco,Huánuco,-9.9333,-76.2333,2,Medicina Interna; Cirugía General; Pediatría; Gineco-Obstetricia,42,7,22,3
+H014,Hospital Essalud Cusco,Cusco,-13.5100,-71.9900,3,Medicina Interna; Cardiología; Nefrología; Traumatología; UCI,0,0,0,0
+H015,Centro Médico Ayacucho,Ayacucho,-13.1600,-74.2200,2,Medicina Interna; Pediatría,20,0,0,0
+H016,Hospital Regional Tacna,Tacna,-18.0167,-70.2500,3,Medicina Interna; Cardiología; Neurología; Traumatología; UCI; Nefrología,48,10,28,5
+H017,Hospital La Libertad Trujillo,La Libertad,-8.1167,-79.0333,3,Medicina Interna; Cardiología; Neurología; Traumatología; UCI; Cirugía General,65,18,35,9
+H018,Hospital Regional Pasco,Pasco,-10.6833,-76.2667,2,Medicina Interna; Traumatología; Cirugía General,30,4,15,2
+H019,Clínica San Pablo Arequipa,Arequipa,-16.4000,-71.5300,3,Cardiología; Neurología; Nefrología; UCI; Cirugía General,40,15,25,8
+H020,Hospital Provincial Andahuaylas,Apurímac,-13.6500,-73.3900,2,Medicina Interna; Cirugía General; Pediatría; Gineco-Obstetricia,25,3,8,1
