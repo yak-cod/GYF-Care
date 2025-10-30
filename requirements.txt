@@ -7,3 +7,5 @@ haversine
 python-dotenv
 requests
 polyline
+plotly
+numpy
