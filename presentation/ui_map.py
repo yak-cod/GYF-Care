@@ -11,7 +11,7 @@ from application.assignment_service import AssignmentService
 
 
 def show_map(pacientes_df, hosp_state_df):
-    st.header("🗺️ Mapa interactivo — Rutas reales con OpenRouteService")
+    st.header("  Mapa interactivo — Rutas reales con OpenRouteService")
 
     # Inicializar servicio de asignación
     if "assignment_service" not in st.session_state:
@@ -52,7 +52,7 @@ def show_map(pacientes_df, hosp_state_df):
 
     # Selector de paciente
     st.markdown("---")
-    st.subheader("🔍 Explorar asignación de paciente")
+    st.subheader("  Explorar asignación de paciente")
 
     paciente_sel = st.selectbox(
         "Selecciona un paciente para ver su asignación óptima:",
@@ -88,7 +88,7 @@ def show_map(pacientes_df, hosp_state_df):
 
             # Agrega esto para debugging:
             if resultado_asignacion["ruta"] and not resultado_asignacion["ruta"]["success"]:
-                st.error(f"🐛 Debug - Error de ruta: {resultado_asignacion['ruta'].get('error')}")
+                st.error(f"Debug - Error de ruta: {resultado_asignacion['ruta'].get('error')}")
                 if "details" in resultado_asignacion["ruta"]:
                     with st.expander("Ver detalles técnicos"):
                         st.json(resultado_asignacion["ruta"])
@@ -123,7 +123,7 @@ def show_map(pacientes_df, hosp_state_df):
                 with col2:
                     st.metric("Tiempo estimado", f"{ruta['duration']:.0f} min")
             elif resultado_asignacion["ruta"]:
-                st.warning(f"⚠️ No se pudo obtener ruta: {resultado_asignacion['ruta'].get('error', 'Error desconocido')}")
+                st.warning(f"  No se pudo obtener ruta: {resultado_asignacion['ruta'].get('error', 'Error desconocido')}")
 
             # Información del hospital
             st.markdown("**Detalles del hospital:**")
@@ -140,7 +140,7 @@ def show_map(pacientes_df, hosp_state_df):
 
     # Crear mapa
     st.markdown("---")
-    st.subheader("🗺️ Visualización del mapa")
+    st.subheader("Visualización del mapa")
 
     # Determinar centro del mapa
     if p_row is not None:
@@ -246,7 +246,7 @@ def show_map(pacientes_df, hosp_state_df):
                     dash_array="10",
                     tooltip=f"Línea recta (ruta real no disponible): {resultado_asignacion['distancia_km']:.2f} km",
                 ).add_to(m)
-                st.warning("⚠️ Mostrando línea recta estimada (ruta por carretera no disponible)")
+                st.warning("  Mostrando línea recta estimada (ruta por carretera no disponible)")
 
         # Si hay grafo UFDS, dibujar conexión entre departamentos
         if resultado_asignacion and resultado_asignacion["ufds_activado"]:
@@ -269,7 +269,7 @@ def show_map(pacientes_df, hosp_state_df):
     st_folium(m, width=MAP_WIDTH, height=MAP_HEIGHT, key="map_main")
 
     # Información adicional
-    with st.expander("ℹ️ Información sobre el sistema"):
+    with st.expander("  Información sobre el sistema"):
         st.markdown("""
         ### Cómo funciona:
         
@@ -278,12 +278,4 @@ def show_map(pacientes_df, hosp_state_df):
         3. **UFDS (Union-Find)**: Si no hay disponibilidad local, el sistema une grafos de departamentos vecinos
         4. **Rutas reales**: Usa OpenRouteService para calcular rutas reales por carretera
         5. **Visualización**: Muestra la ruta óptima considerando distancia y especialización
-        
-        **Leyenda:**
-        - 🔴 Paciente
-        - 🟢 Hospital asignado
-        - 🔵 Hospital disponible
-        - ⚫ Hospital sin camas
-        - 🟦 Ruta local (mismo departamento)
-        - 🟩 Ruta interdepartamental (UFDS activado)
         """)
