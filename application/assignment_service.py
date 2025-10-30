@@ -1,3 +1,4 @@
+# application/assignment_service.py
 from typing import Tuple, Optional, Dict, List
 import pandas as pd
 import networkx as nx
@@ -45,7 +46,7 @@ class AssignmentService:
 
         enfermedad = str(paciente_row["Enfermedad"]).lower()
 
-        # Mapeo mejorado enfermedad -> especialidad
+        # Mapeo mejorado enfermedad
         mapeo_especialidades = {
             # Traumatología
             "tce": "Traumatología",
@@ -199,7 +200,7 @@ class AssignmentService:
                     resultado["ufds_activado"] = True
                     resultado["departamentos_unidos"] = [dept_paciente, dept_vecino]
                     resultado["distancia_km"] = hospital_mas_cercano["dist_km"]
-                    resultado["mensaje"] = f"🌐 UFDS activado: {dept_paciente} ↔ {dept_vecino} | Hospital con {especialidad} encontrado"
+                    resultado["mensaje"] = f"UFDS activado: {dept_paciente} ↔ {dept_vecino} | Hospital con {especialidad} encontrado"
 
                     # Obtener ruta real
                     ruta = self.route_service.get_route(
