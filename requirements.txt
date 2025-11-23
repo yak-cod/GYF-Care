@@ -9,3 +9,6 @@ requests
 polyline
 plotly
 numpy
+pyvis
+matplotlib
+streamlit-folium
