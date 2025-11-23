@@ -1,3 +1,4 @@
+# shared/config.py
 import os
 from dotenv import load_dotenv
 
@@ -5,14 +6,19 @@ load_dotenv()
 
 # Configuración general de la app
 APP_TITLE = "GYF Care — Asignación inteligente de pacientes"
-CENTER_COORDS = [-12.0464, -77.0428]  # Lima centro por defecto (cambiar según departamento)
+CENTER_COORDS = [-12.0464, -77.0428]  # Lima centro por defecto
 DEFAULT_TOP_K = 5
 MAP_WIDTH = 1100
 MAP_HEIGHT = 650
 
 # OpenRouteService API Configuration
-ORS_API_KEY = os.getenv("ORS_API_KEY", "eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6IjdjNDczMzkwZmIzNDQxMGZiNWFiNWE5YjcyMTg1MjI2IiwiaCI6Im11cm11cjY0In0=")
+# Puedes sobreescribir ORS_API_KEY con variable de entorno.
+ORS_API_KEY = os.getenv(
+    "ORS_API_KEY",
+    "eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6IjdjNDczMzkwZmIzNDQxMGZiNWFiNWE5YjcyMTg1MjI2IiwiaCI6Im11cm11cjY0In0=",
+)
 ORS_BASE_URL = "https://api.openrouteservice.org"
+# Endpoint estándar (no GeoJSON). El RouteService ya soporta ambos formatos.
 ORS_DIRECTIONS_ENDPOINT = f"{ORS_BASE_URL}/v2/directions/driving-car"
 ORS_MAX_RETRIES = 3
 ORS_TIMEOUT = 10  # segundos
@@ -38,6 +44,6 @@ DEPARTAMENTO_COORDS = {
     "Moquegua": [-17.1833, -70.9333],
 }
 
-# Configuración de caché
+# Configuración de caché de rutas ORS
 CACHE_DIR = "cache"
 ENABLE_ROUTE_CACHE = True

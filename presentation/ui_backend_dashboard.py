@@ -1,6 +1,7 @@
 # presentation/ui_backend_dashboard.py
 
 import random
+from typing import Optional
 
 import streamlit as st
 import streamlit.components.v1 as components
@@ -11,81 +12,70 @@ from pyvis.network import Network
 import folium
 from streamlit_folium import st_folium
 
-API_BASE = "http://localhost:5000/api"
+from shared.config import MAP_WIDTH, MAP_HEIGHT, DEPARTAMENTO_COORDS
+from infrastructure.route_service import RouteService
+
+API_BASE = "https://gyf-care-backend.onrender.com/api"
+
+route_service = RouteService()
 
 
 # ================================
-# API WRAPPERS
+# API HELPERS
 # ================================
-
 def api_get(path: str, params: dict | None = None):
     url = f"{API_BASE}{path}"
     resp = requests.get(url, params=params)
-    resp.raise_for_status()
+    if resp.status_code >= 400:
+        raise RuntimeError(f"GET {url} → {resp.status_code}: {resp.text}")
     return resp.json()
 
 
 def api_post(path: str, body: dict):
     url = f"{API_BASE}{path}"
     resp = requests.post(url, json=body)
-    resp.raise_for_status()
+    if resp.status_code >= 400:
+        raise RuntimeError(f"POST {url} → {resp.status_code}: {resp.text}")
     return resp.json()
 
 
 # ================================
-# HELPERS PARA TOOLTIP
+# TOOLTIP HELPERS
 # ================================
-
 def _title_paciente(p: dict) -> str:
     pid = p.get("code") or p.get("id")
-    dept = p.get("department") or p.get("departamento") or "-"
-    disease = p.get("disease") or p.get("enfermedad") or "-"
-    severity = p.get("severity") or p.get("gravedad") or "-"
-    lines = [
-        f"<b>Paciente {pid}</b>",
-        f"Depto: {dept}",
-        f"Enfermedad: {disease}",
-        f"Gravedad: {severity}",
-    ]
-    return "<br>".join(lines)
-
-
-def _title_hospital(h: dict) -> str:
-    hid = h.get("id")
-    name = h.get("name") or h.get("nombre") or "-"
-    dept = h.get("department") or h.get("departamento") or "-"
-    beds = (
-        h.get("beds")
-        or h.get("capacidad_camas")
-        or h.get("Capacidad_Camas")
-        or h.get("capacity")
-        or "-"
+    dept = p.get("department") or "-"
+    disease = p.get("disease") or "-"
+    severity = p.get("severity") or "-"
+    return "<br>".join(
+        [
+            f"<b>Paciente {pid}</b>",
+            f"Depto: {dept}",
+            f"Enfermedad: {disease}",
+            f"Gravedad: {severity}",
+        ]
     )
-    uci = h.get("uci_beds") or h.get("camas_uci") or h.get("Camas_UCI") or "-"
-    specs = h.get("specialties") or h.get("especialidades") or "-"
-    lines = [
-        f"<b>Hospital {hid}</b>",
-        name,
-        f"Depto: {dept}",
-        f"Camas: {beds} | UCI: {uci}",
-        f"Especialidades: {specs}",
-    ]
-    return "<br>".join(lines)
+
+
+def _title_hospital_backend(h: dict) -> str:
+    hid = h.get("id") or h.get("code")
+    name = h.get("name") or "-"
+    dept = h.get("department") or "-"
+    specs = h.get("specialties") or "-"
+    return "<br>".join(
+        [
+            f"<b>Hospital {hid}</b>",
+            name,
+            f"Depto: {dept}",
+            f"Especialidades: {specs}",
+        ]
+    )
 
 
 # ================================
 # PYVIS — GRAFO INTERACTIVO
 # ================================
-
 def draw_graph(patients, hospitals, edges, title: str, max_edges: int = 8000):
-    """
-    Dibuja un grafo interactivo usando PyVis.
-    - Pacientes: nodos grises pequeños.
-    - Hospitales: nodos de color (por departamento) más grandes.
-    - Aristas: color del hospital al que conectan.
-    - max_edges: máximo de aristas a visualizar (para no saturar la vista).
-    """
-
     net = Network(
         height="800px",
         width="100%",
@@ -96,11 +86,17 @@ def draw_graph(patients, hospitals, edges, title: str, max_edges: int = 8000):
     net.force_atlas_2based(gravity=-50)
     net.heading = title
 
-    # Colores por departamento de hospital
     base_colors = [
-        "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728",
-        "#9467bd", "#8c564b", "#e377c2", "#7f7f7f",
-        "#bcbd22", "#17becf",
+        "#1f77b4",
+        "#ff7f0e",
+        "#2ca02c",
+        "#d62728",
+        "#9467bd",
+        "#8c564b",
+        "#e377c2",
+        "#7f7f7f",
+        "#bcbd22",
+        "#17becf",
     ]
     dept_color_map: dict[str, str] = {}
     hospital_color_map: dict[str, str] = {}
@@ -108,17 +104,19 @@ def draw_graph(patients, hospitals, edges, title: str, max_edges: int = 8000):
     # Hospitales
     for h in hospitals:
         hid = h.get("id")
-        dept = h.get("department") or h.get("departamento") or "Hospital"
+        if hid is None:
+            continue
+        dept = h.get("department") or "Hospital"
 
         if dept not in dept_color_map:
             dept_color_map[dept] = base_colors[len(dept_color_map) % len(base_colors)]
         color = dept_color_map[dept]
-        hospital_color_map[hid] = color
+        hospital_color_map[str(hid)] = color
 
         net.add_node(
-            hid,
+            str(hid),
             label=str(hid),
-            title=_title_hospital(h),
+            title=_title_hospital_backend(h),
             color=color,
             shape="square",
             size=22,
@@ -129,8 +127,10 @@ def draw_graph(patients, hospitals, edges, title: str, max_edges: int = 8000):
     # Pacientes
     for p in patients:
         pid = p.get("id")
+        if pid is None:
+            continue
         net.add_node(
-            pid,
+            str(pid),
             label=str(pid),
             title=_title_paciente(p),
             color="#555555",
@@ -139,27 +139,23 @@ def draw_graph(patients, hospitals, edges, title: str, max_edges: int = 8000):
             group="Paciente",
         )
 
-    # Limitar número de aristas para visualización
+    # Aristas (limitadas)
     total_edges = len(edges)
     if total_edges > max_edges:
         edges_to_draw = random.sample(edges, max_edges)
-        st.info(
-            f"Se muestran {max_edges} de {total_edges} aristas para una mejor visualización."
-        )
+        st.info(f"Se muestran {max_edges} de {total_edges} aristas.")
     else:
         edges_to_draw = edges
 
-    # Aristas
     for e in edges_to_draw:
-        s = e.get("source")
-        t = e.get("target")
+        s = str(e.get("source"))
+        t = str(e.get("target"))
         dist = e.get("weight") or e.get("distance_km") or e.get("dist_km")
 
-        # color = color del hospital si está en el grafo
         hosp_id = t if t in hospital_color_map else (s if s in hospital_color_map else None)
         edge_color = hospital_color_map.get(hosp_id, "#CCCCCC")
 
-        title_edge = None
+        title_edge: Optional[str] = None
         if dist is not None:
             try:
                 title_edge = f"Distancia: {float(dist):.2f} km"
@@ -175,50 +171,47 @@ def draw_graph(patients, hospitals, edges, title: str, max_edges: int = 8000):
             physics=True,
         )
 
-    # Generar HTML en memoria
     html_str = net.generate_html(notebook=False)
     components.html(html_str, height=800, scrolling=True)
-
-    st.caption(
-        "Pacientes = gris • Hospitales = colores por departamento • "
-        "Aristas = color del hospital (usa zoom/drag y hover para detalles)."
-    )
 
 
 # ================================
 # MAIN UI
 # ================================
-
 def show_backend_dashboard():
-    st.title("Panel de algoritmos y grafos (Backend Flask)")
+    st.header("Panel backend: grafos, asignación y rutas reales")
 
-    st.markdown("""
-        ### Funcionalidades:
-        - Visualizar grafos **KNN**, **Radio** y **Bipartito**.
-        - Ver métricas de construcción de grafo.
-        - Elegir un **paciente** y un **grafo** para la asignación.
-        - Comparar algoritmos de **asignación**: Greedy, Hungarian, MCMF.
-        - Ver tiempos de los algoritmos de **ruta más corta**: Dijkstra y Bellman-Ford.
-    """)
+    # =========================
+    # Cargar pacientes y hospitales DESDE EL BACKEND
+    # =========================
+    try:
+        patients_list = api_get("/patients")
+    except Exception as e:
+        st.error(f"No se pudo obtener /patients: {e}")
+        return
 
-    # ================================
-    # 1) GRAFOS
-    # ================================
-    st.header("1. Selección y visualización de grafo")
+    if not patients_list:
+        st.warning("No hay pacientes en el backend.")
+        return
 
-    st.caption(
-        "Aquí eliges **cómo se construye el grafo** que conecta pacientes con hospitales.\n"
-        "- KNN: cada nodo se conecta con sus k vecinos más cercanos.\n"
-        "- Bipartito: cada paciente se conecta con sus k hospitales más cercanos.\n"
-        "- Radio: se conectan nodos que están a una distancia menor o igual al radio en km."
-    )
+    # hospitales opcionales, solo para el mapa
+    hospitals_list = []
+    try:
+        hospitals_list = api_get("/hospitals")
+    except Exception:
+        hospitals_list = []
+
+    # =========================
+    # 1) GRAFO
+    # =========================
+    st.subheader("1. Grafo")
 
     mode = st.selectbox(
-        "Tipo de grafo para visualizar",
+        "Tipo de grafo",
         options=["bipartite_knn", "knn", "radius"],
         format_func=lambda m: {
             "knn": "KNN geográfico",
-            "radius": "Por radio (ε-vecindario)",
+            "radius": "Por radio",
             "bipartite_knn": "Bipartito paciente → hospital",
         }[m],
     )
@@ -227,124 +220,101 @@ def show_backend_dashboard():
     radius_km = None
 
     if mode in ("knn", "bipartite_knn"):
-        k = st.number_input(
-            "Parámetro k (número de vecinos más cercanos)",
-            min_value=1,
-            max_value=50,
-            value=10,
-            key="k_vis",
-            help=(
-                "k indica cuántos vecinos se conectan:\n"
-                "- En KNN: cada nodo se conecta con sus k nodos más cercanos.\n"
-                "- En Bipartito: cada paciente se conecta con sus k hospitales más cercanos."
-            ),
-        )
+        k = st.number_input("k (vecinos)", min_value=1, max_value=50, value=10, key="k_vis")
 
     if mode == "radius":
         radius_km = st.number_input(
-            "Radio (km) del grafo por radio",
-            min_value=1.0,
-            max_value=500.0,
-            value=50.0,
-            key="r_vis",
-            help=(
-                "Dos nodos se conectan si la distancia entre ellos "
-                "es menor o igual a este valor (en kilómetros)."
-            ),
+            "Radio (km)", min_value=1.0, max_value=500.0, value=50.0, key="r_vis"
         )
 
-    # Slider para controlar cuántas aristas se dibujan
     edge_limit = st.slider(
-        "Máximo de aristas a visualizar",
+        "Máx. aristas a visualizar",
         min_value=1000,
         max_value=30000,
         value=8000,
         step=1000,
-        help="Solo se dibujan hasta este número de aristas para que el grafo sea legible.",
     )
 
     if st.button("Generar grafo", type="primary"):
-        if mode == "knn":
-            data = api_get("/graph/knn", params={"k": int(k)})
-            title = f"Grafo KNN (k={k})"
-        elif mode == "radius":
-            data = api_get("/graph/radius", params={"radius": float(radius_km)})
-            title = f"Grafo por radio R={radius_km} km"
-        else:  # bipartito
-            data = api_get("/graph/bipartite", params={"k": int(k)})
-            title = f"Grafo bipartito paciente → hospital (k={k})"
+        try:
+            if mode == "knn":
+                data = api_get("/graph/knn", params={"k": int(k)})
+                title = f"Grafo KNN (k={k})"
+            elif mode == "radius":
+                data = api_get("/graph/radius", params={"radius": float(radius_km)})
+                title = f"Grafo por radio (R={radius_km} km)"
+            else:
+                data = api_get("/graph/bipartite", params={"k": int(k)})
+                title = f"Grafo bipartito (k={k})"
 
-        patients = data.get("patients", [])
-        hospitals = data.get("hospitals", [])
-        edges = data.get("edges", [])
+            patients = data.get("patients", [])
+            hospitals = data.get("hospitals", [])
+            edges = data.get("edges", [])
 
-        st.success(
-            f"Grafo generado: {len(patients)} pacientes, "
-            f"{len(hospitals)} hospitales, {len(edges)} aristas."
-        )
-        draw_graph(patients, hospitals, edges, title, max_edges=int(edge_limit))
-
-    # ================================
-    # 2) COMPARACIÓN DE GRAFOS
-    # ================================
-    st.subheader("Comparación de constructores de grafos")
-
-    st.caption(
-        "En esta sección comparas los **tres métodos de construcción de grafos** usando los mismos parámetros.\n"
-        "- `k para comparar KNN y Bipartito`: cuántos vecinos se conectan por nodo/paciente.\n"
-        "- `Radio (km) para comparar por radio`: distancia máxima para conectar nodos.\n"
-        "Las métricas devueltas indican qué método es más rápido y cuál genera un grafo más denso."
-    )
-
-    col1, col2 = st.columns(2)
-    k_cmp = col1.number_input(
-        "k para comparar KNN y Bipartito",
-        min_value=1,
-        max_value=50,
-        value=10,
-        key="k_cmp",
-        help="Este k se usa tanto en el grafo KNN como en el grafo bipartito.",
-    )
-    radius_cmp = col2.number_input(
-        "Radio (km) para comparar grafo por radio",
-        min_value=1.0,
-        max_value=500.0,
-        value=50.0,
-        key="r_cmp",
-        help="Este radio se usa para construir el grafo basado en distancia.",
-    )
-
-    if st.button("Comparar métodos"):
-        cmp_data = api_get(
-            "/graph/compare",
-            params={"k": int(k_cmp), "radius": float(radius_cmp)},
-        )
-        graphs = cmp_data.get("graphs", [])
-        if graphs:
-            st.dataframe(pd.DataFrame(graphs))
-            st.markdown("""
-            - `time_ms`: tiempo que tomó construir cada grafo.
-            - `num_edges`: número total de aristas del grafo.
-            - `avg_degree`: grado promedio, indica qué tan denso es el grafo.
-            """)
-        else:
-            st.warning("No se recibieron datos.")
+            st.success(
+                f"Grafo: {len(patients)} pacientes, "
+                f"{len(hospitals)} hospitales, {len(edges)} aristas."
+            )
+            draw_graph(patients, hospitals, edges, title, max_edges=int(edge_limit))
+        except Exception as e:
+            st.error(f"Error al obtener grafo: {e}")
 
     st.markdown("---")
 
-    # ================================
-    # 3) ASIGNACIÓN DE PACIENTES
-    # ================================
-    st.header("2. Asignación de pacientes")
+    # =========================
+    # 2) COMPARACIÓN DE GRAFOS
+    # =========================
+    st.subheader("2. Comparación de constructores de grafos")
 
-    # --- Configuración de grafo para la ASIGNACIÓN ---
-    st.subheader("Configurar grafo para la asignación")
-
-    st.caption(
-        "Aquí eliges **qué grafo** usará el backend para calcular la asignación del paciente.\n"
-        "Usará los mismos constructores de grafos, pero ahora aplicados al cálculo de rutas y hospital final."
+    col1, col2 = st.columns(2)
+    k_cmp = col1.number_input(
+        "k (KNN y bipartito)", min_value=1, max_value=50, value=10, key="k_cmp"
+    )
+    radius_cmp = col2.number_input(
+        "Radio (km)", min_value=1.0, max_value=500.0, value=50.0, key="r_cmp"
     )
 
+    if st.button("Comparar métodos"):
+        try:
+            cmp_data = api_get(
+                "/graph/compare",
+                params={"k": int(k_cmp), "radius": float(radius_cmp)},
+            )
+            graphs = cmp_data.get("graphs", [])
+            if graphs:
+                st.dataframe(pd.DataFrame(graphs))
+            else:
+                st.warning("Sin datos desde /graph/compare.")
+        except Exception as e:
+            st.error(f"Error /graph/compare: {e}")
+
+    st.markdown("---")
+
+    # =========================
+    # 3) ASIGNACIÓN + MAPA
+    # =========================
+    st.subheader("3. Asignación de paciente y rutas")
+
+    # Paciente desde /patients (backend)
+    opciones_pac = [
+        f"{p.get('code')} - {p.get('department', 'N/A')} - {p.get('disease', 'N/A')}"
+        for p in patients_list
+    ]
+    codigos_pac = [p.get("code") for p in patients_list]
+
+    seleccion = st.selectbox("Paciente", opciones_pac)
+    idx = opciones_pac.index(seleccion)
+    selected_code = codigos_pac[idx]
+    paciente_sel = patients_list[idx]
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("ID", paciente_sel.get("code"))
+    c2.metric("Gravedad", paciente_sel.get("severity", "N/A"))
+    c3.metric("Departamento", paciente_sel.get("department", "N/A"))
+    enf = str(paciente_sel.get("disease", "N/A"))
+    c4.metric("Enfermedad", enf[:20] + "..." if len(enf) > 20 else enf)
+
+    # Config grafo para backend
     colg1, colg2, colg3 = st.columns(3)
     with colg1:
         assign_graph_mode = st.selectbox(
@@ -352,232 +322,110 @@ def show_backend_dashboard():
             options=["bipartite_knn", "knn", "radius"],
             format_func=lambda m: {
                 "knn": "KNN geográfico",
-                "radius": "Por radio (ε-vecindario)",
+                "radius": "Por radio",
                 "bipartite_knn": "Bipartito paciente → hospital",
             }[m],
         )
-
     with colg2:
         if assign_graph_mode in ("knn", "bipartite_knn"):
             k_assign = st.number_input(
-                "k (asignación: vecinos/hospitales más cercanos)",
-                min_value=1,
-                max_value=50,
-                value=10,
-                key="k_assign",
-                help="En asignación, k controla cuántos vecinos/hospitales cercanos se consideran en el grafo.",
+                "k asignación", min_value=1, max_value=50, value=10, key="k_assign"
             )
         else:
             k_assign = None
-
     with colg3:
         if assign_graph_mode == "radius":
             radius_assign = st.number_input(
-                "Radio (km) para el grafo de asignación",
+                "Radio asignación (km)",
                 min_value=1.0,
                 max_value=500.0,
                 value=50.0,
                 key="r_assign",
-                help="En asignación, el grafo conecta nodos que estén dentro de este radio en km.",
             )
         else:
             radius_assign = None
 
-    st.caption(
-        "El grafo elegido aquí será el que use el backend para calcular rutas y asignar el hospital."
-    )
-
-    # --- Lista de pacientes ---
-    try:
-        patients_list = api_get("/patients")
-    except Exception as e:
-        st.error(f"No se pudo obtener /patients: {e}")
-        return
-
-    if not patients_list:
-        st.warning("No hay pacientes disponibles.")
-        return
-
-    options = [
-        f"{p.get('code')} - {p.get('department')} - {p.get('disease')}"
-        for p in patients_list
-    ]
-    codes = [p.get("code") for p in patients_list]
-
-    selected = st.selectbox("Selecciona un paciente", options)
-    selected_code = codes[options.index(selected)]
-
-    # Inicializar estado para guardar último resultado de asignación
-    if "best_assignment_state" not in st.session_state:
-        st.session_state["best_assignment_state"] = None
-
-    # ================================
-    # 3.1 ASIGNACIÓN FINAL
-    # ================================
     colA, colB = st.columns(2)
 
+    # -------- 3.1 Asignación (backend) ----------
     with colA:
-        st.subheader("Asignación final (patient-best)")
-
+        st.markdown("##### Asignación backend")
         if st.button("Asignar paciente con este grafo", key="btn_best"):
             try:
+                k_val = int(k_assign) if k_assign is not None else 10
+                radius_val = float(radius_assign) if radius_assign is not None else 50.0
+
                 body = {
                     "patient_code": selected_code,
                     "graph_mode": assign_graph_mode,
-                    "k": int(k_assign) if k_assign is not None else None,
-                    "radius_km": float(radius_assign) if radius_assign is not None else None,
+                    "k": k_val,
+                    "radius_km": radius_val,
                 }
+
                 best = api_post("/assign/patient-best", body)
 
-                # Guardar en session_state para que NO desaparezca
-                st.session_state["best_assignment_state"] = {
-                    "best": best,
-                    "graph_mode": assign_graph_mode,
-                    "k_assign": k_assign,
-                    "radius_assign": radius_assign,
+                patient_json = best.get("patient", {})
+                hospital_json = best.get("hospital", {})
+                algo = best.get("algorithm_used")
+                dist_geo = best.get("distance_geo_km")
+                paths = best.get("paths") or {}
+
+                # Ruta real con RouteService (ORS)
+                p_lat = patient_json.get("lat")
+                p_lon = patient_json.get("lon")
+                h_lat = hospital_json.get("lat")
+                h_lon = hospital_json.get("lon")
+
+                ruta = None
+                if None not in (p_lat, p_lon, h_lat, h_lon):
+                    ruta = route_service.get_route(
+                        start_lat=float(p_lat),
+                        start_lon=float(p_lon),
+                        end_lat=float(h_lat),
+                        end_lon=float(h_lon),
+                    )
+
+                st.session_state["backend_assign_result"] = {
+                    "patient_code": selected_code,
+                    "patient_json": patient_json,
+                    "hospital_json": hospital_json,
+                    "algo": algo,
+                    "dist_geo": dist_geo,
+                    "paths": paths,
+                    "route": ruta,
                 }
+
+                st.success("Asignación calculada correctamente.")
+
             except Exception as e:
                 st.error(f"Error /assign/patient-best: {e}")
 
-        state = st.session_state.get("best_assignment_state")
-
-        if state:
-            best = state["best"]
-            g_mode = state["graph_mode"]
-            k_a = state["k_assign"]
-            r_a = state["radius_assign"]
-
-            patient = best.get("patient", {})
-            hospital = best.get("hospital", {})
-            algo = best.get("algorithm_used")
-            dist_geo = best.get("distance_geo_km")
-            paths = best.get("paths") or {}
-
-            st.markdown("#### Paciente")
-            st.write(
-                f"**{patient.get('code')}** — {patient.get('department')} — "
-                f"{patient.get('disease')} (Gravedad: {patient.get('severity')})"
-            )
-
-            st.markdown("#### Hospital asignado")
-            st.write(
-                f"**{hospital.get('name')}** (`{hospital.get('code')}`) — "
-                f"{hospital.get('department')}"
-            )
-
-            st.markdown("#### Métricas de la asignación")
-            colm1, colm2, colm3 = st.columns(3)
-            colm1.metric("Algoritmo usado", algo)
-
-            if dist_geo is not None:
-                try:
-                    colm2.metric("Distancia geo (km)", f"{float(dist_geo):.2f}")
-                except Exception:
-                    colm2.metric("Distancia geo (km)", str(dist_geo))
-
-            dijkstra = paths.get("dijkstra") or {}
-            bellman = paths.get("bellman_ford") or {}
-
-            td = dijkstra.get("time_ms")
-            tb = bellman.get("time_ms")
-
-            # Métrica solo con el título y detalle abajo para no cortar texto
-            colm3.metric("Tiempos rutas (ms)", "")
-
-            if td is not None or tb is not None:
-                parts = []
-                if td is not None:
-                    try:
-                        parts.append(f"Dijkstra: **{float(td):.3f} ms**")
-                    except Exception:
-                        parts.append(f"Dijkstra: **{td} ms**")
-                if tb is not None:
-                    try:
-                        parts.append(f"Bellman-Ford: **{float(tb):.3f} ms**")
-                    except Exception:
-                        parts.append(f"Bellman-Ford: **{tb} ms**")
-
-                st.caption(" | ".join(parts))
-
-            st.caption(
-                "Dijkstra y Bellman-Ford se usan como algoritmos de ruta más corta "
-                "para medir las distancias en el grafo entre paciente y hospital asignado."
-            )
-
-            # Grafo configurado
-            st.markdown("##### Grafo usado en la asignación")
-            st.markdown(f"- **Tipo:** `{g_mode}`")
-            if k_a is not None:
-                st.markdown(f"- **k:** `{int(k_a)}`")
-            if r_a is not None:
-                st.markdown(f"- **Radio (km):** `{float(r_a)}`")
-
-            # ============================
-            # Mapa Folium paciente → hospital
-            # ============================
-            p_lat = patient.get("lat")
-            p_lon = patient.get("lon")
-            h_lat = hospital.get("lat")
-            h_lon = hospital.get("lon")
-
-            if None not in (p_lat, p_lon, h_lat, h_lon):
-                st.markdown("##### Ruta en el mapa")
-
-                center_lat = (p_lat + h_lat) / 2
-                center_lon = (p_lon + h_lon) / 2
-
-                m = folium.Map(location=[center_lat, center_lon], zoom_start=7)
-
-                folium.Marker(
-                    [p_lat, p_lon],
-                    popup=f"Paciente {patient.get('code')}",
-                    tooltip="Paciente",
-                    icon=folium.Icon(color="red", icon="user"),
-                ).add_to(m)
-
-                folium.Marker(
-                    [h_lat, h_lon],
-                    popup=f"Hospital {hospital.get('name')} ({hospital.get('code')})",
-                    tooltip="Hospital asignado",
-                    icon=folium.Icon(color="green", icon="plus-sign"),
-                ).add_to(m)
-
-                folium.PolyLine(
-                    locations=[[p_lat, p_lon], [h_lat, h_lon]],
-                    weight=4,
-                    opacity=0.8,
-                ).add_to(m)
-
-                st_folium(m, width=900, height=500)
-            else:
-                st.info("No se encontraron coordenadas para mostrar el mapa.")
-
-    # ================================
-    # 3.2 COMPARACIÓN DE ALGORITMOS
-    # ================================
+    # -------- 3.2 Comparación de algoritmos ----------
     with colB:
-        st.subheader("Comparación de algoritmos (asignación y rutas)")
+        st.markdown("##### Comparación de algoritmos")
         if st.button("Comparar algoritmos con este grafo", key="btn_compare"):
             try:
+                k_val = int(k_assign) if k_assign is not None else 10
+                radius_val = float(radius_assign) if radius_assign is not None else 50.0
+
                 body = {
                     "patient_code": selected_code,
                     "graph_mode": assign_graph_mode,
-                    "k": int(k_assign) if k_assign is not None else None,
-                    "radius_km": float(radius_assign) if radius_assign is not None else None,
+                    "k": k_val,
+                    "radius_km": radius_val,
                 }
+
                 cmp = api_post("/assign/compare-patient", body)
                 algos = cmp.get("assignment_algorithms", [])
 
                 if algos:
                     df = pd.DataFrame(algos)
-
-                    # Tabla de métricas principales de asignación
                     cols_basic = [
-                        c for c in ["name", "big_o", "time_ms", "distance_geo_km"]
+                        c
+                        for c in ["name", "big_o", "time_ms", "distance_geo_km"]
                         if c in df.columns
                     ]
                     if cols_basic:
-                        st.markdown("##### Algoritmos de asignación (Greedy / Hungarian / MCMF)")
                         st.dataframe(
                             df[cols_basic].style.format(
                                 {
@@ -586,55 +434,185 @@ def show_backend_dashboard():
                                 }
                             )
                         )
-                        st.caption(
-                            "`time_ms` muestra el tiempo de ejecución de cada algoritmo de asignación; "
-                            "`distance_geo_km` la distancia geográfica paciente–hospital asignado."
-                        )
 
-                    # Comparación de algoritmos de ruta más corta por cada algoritmo de asignación
                     paths_rows = []
                     for a in algos:
                         aname = a.get("name")
-                        p = a.get("paths") or {}
-                        d = p.get("dijkstra") or {}
-                        b = p.get("bellman_ford") or {}
+                        pth = a.get("paths") or {}
+                        d = pth.get("dijkstra") or {}
+                        b = pth.get("bellman_ford") or {}
 
                         if d:
-                            paths_rows.append({
-                                "assignment_algo": aname,
-                                "route_algo": d.get("algorithm", "Dijkstra"),
-                                "distance": d.get("distance"),
-                                "time_ms": d.get("time_ms"),
-                            })
+                            paths_rows.append(
+                                {
+                                    "assignment_algo": aname,
+                                    "route_algo": d.get("algorithm", "Dijkstra"),
+                                    "distance": d.get("distance"),
+                                    "time_ms": d.get("time_ms"),
+                                }
+                            )
                         if b:
-                            paths_rows.append({
-                                "assignment_algo": aname,
-                                "route_algo": b.get("algorithm", "Bellman-Ford"),
-                                "distance": b.get("distance"),
-                                "time_ms": b.get("time_ms"),
-                            })
+                            paths_rows.append(
+                                {
+                                    "assignment_algo": aname,
+                                    "route_algo": b.get("algorithm", "Bellman-Ford"),
+                                    "distance": b.get("distance"),
+                                    "time_ms": b.get("time_ms"),
+                                }
+                            )
 
                     if paths_rows:
                         df_paths = pd.DataFrame(paths_rows)
-                        st.markdown("##### Algoritmos de ruta más corta (Dijkstra vs Bellman-Ford)")
                         st.dataframe(
                             df_paths.style.format(
-                                {
-                                    "time_ms": "{:.6f}",
-                                    "distance": "{:.4f}",
-                                }
+                                {"time_ms": "{:.6f}", "distance": "{:.4f}"}
                             )
                         )
-                        st.caption(
-                            "Aquí se comparan los tiempos y distancias de Dijkstra y Bellman-Ford, "
-                            "usados como algoritmos de ruta más corta sobre el grafo configurado."
-                        )
-
-                    # Detalle completo, sin columnas grandes
-                    st.expander("Ver detalle completo de asignación (sin hospital/paths)").dataframe(
-                        df.drop(columns=["hospital", "paths"], errors="ignore")
-                    )
                 else:
-                    st.warning("Sin datos de algoritmos de asignación.")
+                    st.warning("Sin datos de algoritmos desde /assign/compare-patient.")
             except Exception as e:
                 st.error(f"Error /assign/compare-patient: {e}")
+
+    # ----- Mostrar último resultado de asignación (persistente) -----
+    assign_state = st.session_state.get("backend_assign_result")
+    if assign_state and assign_state.get("patient_code") == selected_code:
+        patient_json = assign_state.get("patient_json", {})
+        hospital_json = assign_state.get("hospital_json", {})
+        algo = assign_state.get("algo")
+        dist_geo = assign_state.get("dist_geo")
+        paths = assign_state.get("paths") or {}
+        ruta = assign_state.get("route")
+
+        st.markdown("#### Detalle de la asignación seleccionada")
+
+        st.write(
+            f"**Paciente:** {patient_json.get('code')} — "
+            f"{patient_json.get('department')} — {patient_json.get('disease')}"
+        )
+        st.write(
+            f"**Hospital:** {hospital_json.get('name')} "
+            f"(`{hospital_json.get('code')}`) — {hospital_json.get('department')}"
+        )
+
+        dijkstra = paths.get("dijkstra") or {}
+        bellman = paths.get("bellman_ford") or {}
+
+        td = dijkstra.get("time_ms")
+        tb = bellman.get("time_ms")
+
+        c_alg, c_dist, c_dij, c_bf = st.columns(4)
+        c_alg.metric("Algoritmo de asignación", algo or "-")
+
+        if dist_geo is not None:
+            try:
+                c_dist.metric("Distancia geo", f"{float(dist_geo):.2f} km")
+            except Exception:
+                c_dist.metric("Distancia geo", str(dist_geo))
+
+        if td is not None:
+            try:
+                c_dij.metric("Dijkstra (ms)", f"{float(td):.3f}")
+            except Exception:
+                c_dij.metric("Dijkstra (ms)", str(td))
+
+        if tb is not None:
+            try:
+                c_bf.metric("Bellman-Ford (ms)", f"{float(tb):.3f}")
+            except Exception:
+                c_bf.metric("Bellman-Ford (ms)", str(tb))
+
+        # Mensaje amigable si no hay carretera cerca
+        if ruta and not ruta.get("success"):
+            details = str(ruta.get("details", ""))
+            if "Could not find routable point" in details:
+                st.warning(
+                    "No se encontró una **carretera cercana** al paciente u hospital "
+                    "(zona sin vías registradas en el mapa). "
+                    "Se muestra solo la línea recta estimada."
+                )
+            else:
+                st.warning(
+                    f"No se pudo trazar la ruta real: {ruta.get('error', 'Error desconocido')}"
+                )
+
+    # =========================
+    # 4) MAPA — SIEMPRE VISIBLE
+    # =========================
+    st.markdown("#### Mapa paciente → hospital")
+
+    # Centro del mapa: paciente seleccionado
+    p_lat = paciente_sel.get("lat")
+    p_lon = paciente_sel.get("lon")
+    if None not in (p_lat, p_lon):
+        center_coords = [float(p_lat), float(p_lon)]
+        zoom_start = 8
+    else:
+        dept = paciente_sel.get("department", "Lima")
+        center_coords = DEPARTAMENTO_COORDS.get(dept, [-12.0464, -77.0428])
+        zoom_start = 6
+
+    m = folium.Map(location=center_coords, zoom_start=zoom_start)
+
+    # Dibujar hospitales del backend (si hay /hospitals)
+    for h in hospitals_list:
+        hlat = h.get("lat")
+        hlon = h.get("lon")
+        if None in (hlat, hlon):
+            continue
+        popup_html = _title_hospital_backend(h)
+        folium.CircleMarker(
+            location=[float(hlat), float(hlon)],
+            radius=7,
+            color="blue",
+            fill=True,
+            fill_color="blue",
+            popup=folium.Popup(popup_html, max_width=300),
+        ).add_to(m)
+
+    # Paciente seleccionado (en rojo)
+    if None not in (p_lat, p_lon):
+        folium.Marker(
+            location=[float(p_lat), float(p_lon)],
+            popup=_title_paciente(paciente_sel),
+            icon=folium.Icon(color="red", icon="user"),
+        ).add_to(m)
+
+    # Dibujar hospital asignado + ruta si hay resultado
+    if assign_state and assign_state.get("patient_code") == selected_code:
+        hospital_json = assign_state.get("hospital_json") or {}
+        ruta = assign_state.get("route")
+
+        h_lat = hospital_json.get("lat")
+        h_lon = hospital_json.get("lon")
+
+        if None not in (h_lat, h_lon):
+            folium.Marker(
+                location=[float(h_lat), float(h_lon)],
+                popup=_title_hospital_backend(hospital_json),
+                icon=folium.Icon(color="green", icon="plus-sign"),
+            ).add_to(m)
+
+        if ruta and ruta.get("success"):
+            # ruta["geometry"] viene en [[lon, lat], ...]
+            coords_folium = [[lat, lon] for lon, lat in ruta["geometry"]]
+            folium.PolyLine(
+                locations=coords_folium,
+                color="green",
+                weight=4,
+                opacity=0.8,
+                tooltip=f"Ruta real: {ruta['distance']:.2f} km, {ruta['duration']:.0f} min",
+            ).add_to(m)
+        elif ruta is not None and None not in (p_lat, p_lon, h_lat, h_lon):
+            folium.PolyLine(
+                locations=[
+                    [float(p_lat), float(p_lon)],
+                    [float(h_lat), float(h_lon)],
+                ],
+                color="gray",
+                weight=3,
+                opacity=0.6,
+                dash_array="10",
+                tooltip="Línea recta (ruta real no disponible)",
+            ).add_to(m)
+
+    st_folium(m, width=MAP_WIDTH, height=MAP_HEIGHT, key="map_backend_main")
