@@ -130,7 +130,7 @@ with st.sidebar:
     st.divider()
 
 # ------------------------
-# Contenido principal según menú
+# Contenido principal según menú aaa
 # ------------------------
 if menu == "Mapa Interactivo":
     ui_map.show_map(pacientes_df, hosp_state)
@@ -161,3 +161,4 @@ st.markdown(
 """,
     unsafe_allow_html=True,
 )
+
