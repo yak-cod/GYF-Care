@@ -149,6 +149,7 @@ elif menu == "Algoritmos y Grafos (Backend)":
     # Panel que consume tu backend Flask vía /api/*
     show_backend_dashboard()
 
+
 # ------------------------
 # Footer
 # ------------------------
