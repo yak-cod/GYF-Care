@@ -16,6 +16,7 @@ from streamlit_folium import st_folium
 from shared.config import MAP_WIDTH, MAP_HEIGHT, DEPARTAMENTO_COORDS
 from infrastructure.route_service import RouteService
 
+
 # ================================
 # CONFIGURACIÓN GENERAL
 # ================================
@@ -25,24 +26,117 @@ API_BASE = os.getenv("API_BASE", "https://gyf-care-backend.onrender.com/api")
 DEFAULT_K = 10
 DEFAULT_RADIUS_KM = 50
 
+# Mapeo legible para modos de grafo
+GRAPH_MODE_LABELS = {
+    "knn": "KNN geográfico",
+    "radius": "Por radio",
+    "bipartite_knn": "Bipartito paciente → hospital",
+}
+
 route_service = RouteService()
 
 
 # ================================
-# HELPERS PARA API (SIN TIMEOUT)
+# CAPA “SERVICIOS” (API CLIENT)
 # ================================
-def api_get(path: str, params: dict | None = None):
+
+def _api_get(path: str, params: dict | None = None):
+    """Llamada GET cruda (sin cache, bajo nivel)."""
     url = f"{API_BASE}{path}"
     resp = requests.get(url, params=params)
     resp.raise_for_status()
     return resp.json()
 
 
-def api_post(path: str, body: dict):
+def _api_post(path: str, body: dict):
+    """Llamada POST cruda (sin cache, bajo nivel)."""
     url = f"{API_BASE}{path}"
     resp = requests.post(url, json=body)
     resp.raise_for_status()
     return resp.json()
+
+
+# ---- Servicios “de dominio” para el frontend ----
+
+@st.cache_data(show_spinner=False)
+def fetch_patients() -> list[dict]:
+    """
+    Devuelve la lista de pacientes desde el backend.
+
+    Se cachea porque:
+    - La lista completa no cambia en cada interacción de la UI.
+    - Evita pegarle al backend en cada rerun de Streamlit.
+    """
+    return _api_get("/patients")
+
+
+@st.cache_data(show_spinner=False)
+def fetch_hospitals() -> list[dict]:
+    """
+    Devuelve la lista de hospitales desde el backend (cacheado).
+    """
+    try:
+        return _api_get("/hospitals")
+    except Exception:
+        return []
+
+
+@st.cache_data(show_spinner=False)
+def fetch_graph(mode: str, k: int, radius_km: float) -> dict:
+    """
+    Construye un grafo en el backend y devuelve sus nodos y aristas.
+
+    Se cachea por combinación (mode, k, radius), así si el usuario
+    genera varias veces el mismo tipo no se recalcula.
+    """
+    if mode == "knn":
+        return _api_get("/graph/knn", params={"k": k})
+    if mode == "radius":
+        return _api_get("/graph/radius", params={"radius": radius_km})
+    # bipartite_knn por defecto
+    return _api_get("/graph/bipartite", params={"k": k})
+
+
+@st.cache_data(show_spinner=False)
+def fetch_graph_comparison(k: int, radius_km: float) -> dict:
+    """
+    Llama al endpoint de comparación de grafos.
+
+    Cacheado porque es un cálculo relativamente pesado pero determinista.
+    """
+    return _api_get(
+        "/graph/compare",
+        params={"k": k, "radius": float(radius_km)},
+    )
+
+
+def assign_patient_best(patient_code: str, graph_mode: str, k: int, radius_km: float) -> dict:
+    """
+    Asigna un paciente usando la lógica de negocio en el backend.
+
+    No se cachea porque conceptualmente es una operación “de negocio”,
+    aunque en la práctica sea determinista. Así evitamos confusiones.
+    """
+    body = {
+        "patient_code": patient_code,
+        "graph_mode": graph_mode,
+        "k": k,
+        "radius_km": float(radius_km),
+    }
+    return _api_post("/assign/patient-best", body)
+
+
+def compare_assignment_algorithms(patient_code: str, graph_mode: str, k: int, radius_km: float) -> dict:
+    """
+    Compara algoritmos de asignación para un paciente dado.
+    """
+    body = {
+        "patient_code": patient_code,
+        "graph_mode": graph_mode,
+        "k": k,
+        "radius_km": float(radius_km),
+    }
+    return _api_post("/assign/compare-patient", body)
 
 
 # ================================
@@ -81,12 +175,12 @@ def _title_hospital_backend(h: dict) -> str:
 # ================================
 # PYVIS — GRAFO INTERACTIVO
 # ================================
-def draw_graph(patients, hospitals, edges, title: str, max_edges: int = 8000):
+def _build_pyvis_network(patients, hospitals, edges, title: str, max_edges: int = 8000) -> str:
     """
-    Dibuja un grafo interactivo:
-    - Pacientes: nodos grises
-    - Hospitales: nodos de color por departamento
-    - Aristas: color del hospital más cercano
+    Construye el grafo en PyVis y devuelve el HTML completo.
+
+    Esta función NO llama a Streamlit directamente, solo retorna el HTML.
+    Así la podemos reusar y guardar en session_state.
     """
 
     net = Network(
@@ -96,7 +190,21 @@ def draw_graph(patients, hospitals, edges, title: str, max_edges: int = 8000):
         font_color="black",
         notebook=False,
     )
+
+    # Física: para grafos grandes, si quieres, puedes simplificar más
     net.force_atlas_2based(gravity=-50)
+
+    # Opciones extra para estabilizar más rápido (opcional)
+    # net.set_options("""
+    # var options = {
+    #   physics: {
+    #     stabilization: {
+    #       iterations: 100
+    #     }
+    #   }
+    # }
+    # """)
+
     net.heading = title
 
     base_colors = [
@@ -156,7 +264,7 @@ def draw_graph(patients, hospitals, edges, title: str, max_edges: int = 8000):
     total_edges = len(edges)
     if total_edges > max_edges:
         edges_to_draw = random.sample(edges, max_edges)
-        st.info(f"Se muestran {max_edges} de {total_edges} aristas para mantener la vista legible.")
+        # El mensaje al usuario lo mostramos fuera, en la sección UI.
     else:
         edges_to_draw = edges
 
@@ -184,37 +292,47 @@ def draw_graph(patients, hospitals, edges, title: str, max_edges: int = 8000):
             title=title_edge,
         )
 
-    html_str = net.generate_html(notebook=False)
+    return net.generate_html(notebook=False)
+
+
+def draw_graph(patients, hospitals, edges, title: str, max_edges: int = 8000):
+    """
+    Dibuja un grafo interactivo en Streamlit usando PyVis.
+
+    Esta función:
+    - Llama a _build_pyvis_network para generar el HTML.
+    - Guarda el HTML en st.session_state (para no desaparecer al tocar otros controles).
+    - Lo muestra con components.html.
+    """
+    html_str = _build_pyvis_network(patients, hospitals, edges, title, max_edges)
+
+    # Guardar para reutilizar si la app se vuelve a ejecutar
+    st.session_state["backend_graph_html"] = {
+        "html": html_str,
+        "title": title,
+        "num_nodes": len(patients) + len(hospitals),
+        "num_edges": len(edges),
+        "max_edges": max_edges,
+    }
+
     components.html(html_str, height=800, scrolling=True)
 
 
-# ================================
-# MAIN UI
-# ================================
-def show_backend_dashboard():
-    st.header("Panel backend: grafos, asignación y rutas reales")
-
-    # =========================
-    # 0) PROBAR CONEXIÓN AL BACKEND
-    # =========================
-    try:
-        patients_list = api_get("/patients")
-    except Exception as e:
-        st.error(f"No se pudo conectar al backend en {API_BASE}.\n\nDetalle: {e}")
+def show_last_graph_if_exists():
+    """
+    Si existe un grafo anterior en session_state, lo vuelve a mostrar.
+    Útil cuando Streamlit hace un rerun por otros widgets.
+    """
+    graph_state = st.session_state.get("backend_graph_html")
+    if not graph_state:
         return
+    components.html(graph_state["html"], height=800, scrolling=True)
 
-    try:
-        hospitals_list = api_get("/hospitals")
-    except Exception:
-        hospitals_list = []
 
-    if not patients_list:
-        st.warning("No hay pacientes en el backend.")
-        return
-
-    # =========================
-    # 1) GRAFO
-    # =========================
+# ================================
+# SECCIONES DE UI
+# ================================
+def section_graph_visualization(patients_list: list[dict], hospitals_list: list[dict]):
     st.subheader("1. Visualización del grafo")
 
     st.caption(
@@ -225,11 +343,7 @@ def show_backend_dashboard():
     mode = st.selectbox(
         "Tipo de grafo",
         options=["bipartite_knn", "knn", "radius"],
-        format_func=lambda m: {
-            "knn": "KNN geográfico",
-            "radius": "Por radio",
-            "bipartite_knn": "Bipartito paciente → hospital",
-        }[m],
+        format_func=lambda m: GRAPH_MODE_LABELS[m],
     )
 
     edge_limit = st.slider(
@@ -240,36 +354,45 @@ def show_backend_dashboard():
         step=1000,
     )
 
+    # Mostrar último grafo si existe (para que no se “borre” al tocar otros controles)
+    show_last_graph_if_exists()
+
     if st.button("Generar grafo", type="primary"):
         try:
-            if mode == "knn":
-                data = api_get("/graph/knn", params={"k": DEFAULT_K})
-                title = f"Grafo KNN (k={DEFAULT_K})"
-            elif mode == "radius":
-                data = api_get("/graph/radius", params={"radius": float(DEFAULT_RADIUS_KM)})
-                title = f"Grafo por radio (R={DEFAULT_RADIUS_KM} km)"
-            else:
-                data = api_get("/graph/bipartite", params={"k": DEFAULT_K})
-                title = f"Grafo bipartito paciente → hospital (k={DEFAULT_K})"
+            with st.spinner("Construyendo grafo en el backend y dibujándolo..."):
+                data = fetch_graph(mode=mode, k=DEFAULT_K, radius_km=float(DEFAULT_RADIUS_KM))
 
-            patients = data.get("patients", [])
-            hospitals = data.get("hospitals", [])
-            edges = data.get("edges", [])
+                patients = data.get("patients", [])
+                hospitals = data.get("hospitals", [])
+                edges = data.get("edges", [])
 
-            st.success(
-                f"Grafo generado: {len(patients)} pacientes, "
-                f"{len(hospitals)} hospitales, {len(edges)} aristas."
-            )
-            draw_graph(patients, hospitals, edges, title, max_edges=int(edge_limit))
+                st.success(
+                    f"Grafo generado: {len(patients)} pacientes, "
+                    f"{len(hospitals)} hospitales, {len(edges)} aristas."
+                )
+
+                total_edges = len(edges)
+                if total_edges > edge_limit:
+                    st.info(
+                        f"Se muestran solo {edge_limit} de {total_edges} aristas "
+                        "para mantener la vista legible y rápida."
+                    )
+
+                title = {
+                    "knn": f"Grafo KNN (k={DEFAULT_K})",
+                    "radius": f"Grafo por radio (R={DEFAULT_RADIUS_KM} km)",
+                    "bipartite_knn": f"Grafo bipartito paciente → hospital (k={DEFAULT_K})",
+                }[mode]
+
+                draw_graph(patients, hospitals, edges, title, max_edges=int(edge_limit))
 
         except Exception as e:
             st.error(f"Error al construir grafo desde el backend: {e}")
 
     st.markdown("---")
 
-    # =========================
-    # 2) COMPARACIÓN DE GRAFOS
-    # =========================
+
+def section_graph_comparison():
     st.subheader("2. Comparación de constructores de grafos")
 
     st.caption(
@@ -279,10 +402,12 @@ def show_backend_dashboard():
 
     if st.button("Comparar métodos"):
         try:
-            cmp_data = api_get(
-                "/graph/compare",
-                params={"k": DEFAULT_K, "radius": float(DEFAULT_RADIUS_KM)},
-            )
+            with st.spinner("Llamando a /graph/compare en el backend..."):
+                cmp_data = fetch_graph_comparison(
+                    k=DEFAULT_K,
+                    radius_km=float(DEFAULT_RADIUS_KM),
+                )
+
             graphs = cmp_data.get("graphs", [])
             if graphs:
                 df_graphs = pd.DataFrame(graphs)
@@ -311,9 +436,8 @@ def show_backend_dashboard():
 
     st.markdown("---")
 
-    # =========================
-    # 3) ASIGNACIÓN + ALGORITMOS
-    # =========================
+
+def section_assignment_controls(patients_list: list[dict]):
     st.subheader("3. Asignación de paciente y algoritmos")
 
     # Selector de paciente
@@ -339,11 +463,7 @@ def show_backend_dashboard():
     assign_graph_mode = st.selectbox(
         "Grafo usado en la asignación",
         options=["bipartite_knn", "knn", "radius"],
-        format_func=lambda m: {
-            "knn": "KNN geográfico",
-            "radius": "Por radio",
-            "bipartite_knn": "Bipartito paciente → hospital",
-        }[m],
+        format_func=lambda m: GRAPH_MODE_LABELS[m],
     )
 
     colA, colB = st.columns(2)
@@ -353,13 +473,13 @@ def show_backend_dashboard():
         st.markdown("**Asignación principal (patient-best)**")
         if st.button("Asignar paciente con este grafo", key="btn_best"):
             try:
-                body = {
-                    "patient_code": selected_code,
-                    "graph_mode": assign_graph_mode,
-                    "k": DEFAULT_K,
-                    "radius_km": float(DEFAULT_RADIUS_KM),
-                }
-                best = api_post("/assign/patient-best", body)
+                with st.spinner("Calculando asignación en el backend..."):
+                    best = assign_patient_best(
+                        patient_code=selected_code,
+                        graph_mode=assign_graph_mode,
+                        k=DEFAULT_K,
+                        radius_km=float(DEFAULT_RADIUS_KM),
+                    )
 
                 # Ruta ORS (real) fuera del backend
                 patient_json = best.get("patient", {})
@@ -391,15 +511,15 @@ def show_backend_dashboard():
         st.markdown("**Comparación de algoritmos de asignación y rutas**")
         if st.button("Comparar algoritmos con este grafo", key="btn_compare"):
             try:
-                body = {
-                    "patient_code": selected_code,
-                    "graph_mode": assign_graph_mode,
-                    "k": DEFAULT_K,
-                    "radius_km": float(DEFAULT_RADIUS_KM),
-                }
-                cmp = api_post("/assign/compare-patient", body)
-                algos = cmp.get("assignment_algorithms", [])
+                with st.spinner("Comparando algoritmos en el backend..."):
+                    cmp = compare_assignment_algorithms(
+                        patient_code=selected_code,
+                        graph_mode=assign_graph_mode,
+                        k=DEFAULT_K,
+                        radius_km=float(DEFAULT_RADIUS_KM),
+                    )
 
+                algos = cmp.get("assignment_algorithms", [])
                 if algos:
                     df = pd.DataFrame(algos)
 
@@ -481,138 +601,174 @@ def show_backend_dashboard():
             except Exception as e:
                 st.error(f"Error /assign/compare-patient: {e}")
 
-    # =========================
+    st.markdown("---")
+
+
+def section_assignment_detail(hospitals_list: list[dict]):
     # 3.3 DETALLE DE ÚLTIMA ASIGNACIÓN + MAPA
-    # =========================
     asign_state = st.session_state.get("backend_assign_result")
-    if asign_state:
-        best = asign_state.get("best", {})
-        ruta = asign_state.get("route")
+    if not asign_state:
+        return
 
-        patient_json = best.get("patient", {})
-        hospital_json = best.get("hospital", {})
-        algo = best.get("algorithm_used")
-        dist_geo = best.get("distance_geo_km")
-        paths = best.get("paths") or {}
+    best = asign_state.get("best", {})
+    ruta = asign_state.get("route")
 
-        st.markdown("### Detalle de la última asignación")
+    patient_json = best.get("patient", {})
+    hospital_json = best.get("hospital", {})
+    algo = best.get("algorithm_used")
+    dist_geo = best.get("distance_geo_km")
+    paths = best.get("paths") or {}
 
-        st.write(
-            f"**Paciente:** {patient_json.get('code')} — "
-            f"{patient_json.get('department')} — {patient_json.get('disease')}"
-        )
-        st.write(
-            f"**Hospital:** {hospital_json.get('name')} "
-            f"(`{hospital_json.get('code')}`) — {hospital_json.get('department')}"
-        )
+    st.markdown("### Detalle de la última asignación")
 
-        dijkstra = paths.get("dijkstra") or {}
-        bellman = paths.get("bellman_ford") or {}
+    st.write(
+        f"**Paciente:** {patient_json.get('code')} — "
+        f"{patient_json.get('department')} — {patient_json.get('disease')}"
+    )
+    st.write(
+        f"**Hospital:** {hospital_json.get('name')} "
+        f"(`{hospital_json.get('code')}`) — {hospital_json.get('department')}"
+    )
 
-        td = dijkstra.get("time_ms")
-        tb = bellman.get("time_ms")
+    dijkstra = paths.get("dijkstra") or {}
+    bellman = paths.get("bellman_ford") or {}
 
-        c_alg, c_dist, c_dij, c_bf = st.columns(4)
-        c_alg.metric("Algoritmo de asignación", algo or "-")
-        if dist_geo is not None:
-            try:
-                c_dist.metric("Distancia geográfica (km)", f"{float(dist_geo):.2f}")
-            except Exception:
-                c_dist.metric("Distancia geográfica (km)", str(dist_geo))
-        if td is not None:
-            try:
-                c_dij.metric("Dijkstra (ms)", f"{float(td):.3f}")
-            except Exception:
-                c_dij.metric("Dijkstra (ms)", str(td))
-        if tb is not None:
-            try:
-                c_bf.metric("Bellman-Ford (ms)", f"{float(tb):.3f}")
-            except Exception:
-                c_bf.metric("Bellman-Ford (ms)", str(tb))
+    td = dijkstra.get("time_ms")
+    tb = bellman.get("time_ms")
 
-        if ruta and not ruta.get("success"):
-            details = str(ruta.get("details", ""))
-            if "Could not find routable point" in details:
-                st.warning(
-                    "No se encontró una carretera cercana en OpenRouteService "
-                    "(zona sin vías registradas). Se muestra solo la línea recta."
-                )
-            else:
-                st.warning(f"No se pudo trazar la ruta real: {ruta.get('error', 'Error desconocido')}")
+    c_alg, c_dist, c_dij, c_bf = st.columns(4)
+    c_alg.metric("Algoritmo de asignación", algo or "-")
+    if dist_geo is not None:
+        try:
+            c_dist.metric("Distancia geográfica (km)", f"{float(dist_geo):.2f}")
+        except Exception:
+            c_dist.metric("Distancia geográfica (km)", str(dist_geo))
+    if td is not None:
+        try:
+            c_dij.metric("Dijkstra (ms)", f"{float(td):.3f}")
+        except Exception:
+            c_dij.metric("Dijkstra (ms)", str(td))
+    if tb is not None:
+        try:
+            c_bf.metric("Bellman-Ford (ms)", f"{float(tb):.3f}")
+        except Exception:
+            c_bf.metric("Bellman-Ford (ms)", str(tb))
 
-        # ====== MAPA ======
-        st.markdown("### Mapa paciente → hospital")
-
-        p_lat = patient_json.get("lat")
-        p_lon = patient_json.get("lon")
-
-        if None not in (p_lat, p_lon):
-            center_coords = [float(p_lat), float(p_lon)]
-            zoom_start = 8
+    if ruta and not ruta.get("success"):
+        details = str(ruta.get("details", ""))
+        if "Could not find routable point" in details:
+            st.warning(
+                "No se encontró una carretera cercana en OpenRouteService "
+                "(zona sin vías registradas). Se muestra solo la línea recta."
+            )
         else:
-            dept = patient_json.get("department", "Lima")
-            center_coords = DEPARTAMENTO_COORDS.get(dept, [-12.0464, -77.0428])
-            zoom_start = 6
+            st.warning(f"No se pudo trazar la ruta real: {ruta.get('error', 'Error desconocido')}")
 
-        m = folium.Map(location=center_coords, zoom_start=zoom_start)
+    # ====== MAPA ======
+    st.markdown("### Mapa paciente → hospital")
 
-        # Hospitales (si están disponibles)
-        for h in hospitals_list:
-            hlat = h.get("lat")
-            hlon = h.get("lon")
-            if None in (hlat, hlon):
-                continue
-            popup_html = _title_hospital_backend(h)
-            folium.CircleMarker(
-                location=[float(hlat), float(hlon)],
-                radius=6,
-                color="blue",
-                fill=True,
-                fill_color="blue",
-                popup=folium.Popup(popup_html, max_width=300),
-            ).add_to(m)
+    p_lat = patient_json.get("lat")
+    p_lon = patient_json.get("lon")
 
-        # Paciente
-        if None not in (p_lat, p_lon):
-            folium.Marker(
-                location=[float(p_lat), float(p_lon)],
-                popup=_title_paciente(patient_json),
-                icon=folium.Icon(color="red", icon="user"),
-            ).add_to(m)
+    if None not in (p_lat, p_lon):
+        center_coords = [float(p_lat), float(p_lon)]
+        zoom_start = 8
+    else:
+        dept = patient_json.get("department", "Lima")
+        center_coords = DEPARTAMENTO_COORDS.get(dept, [-12.0464, -77.0428])
+        zoom_start = 6
 
-        # Hospital asignado + ruta
-        h_lat = hospital_json.get("lat")
-        h_lon = hospital_json.get("lon")
+    m = folium.Map(location=center_coords, zoom_start=zoom_start)
 
-        if None not in (h_lat, h_lon):
-            folium.Marker(
-                location=[float(h_lat), float(h_lon)],
-                popup=_title_hospital_backend(hospital_json),
-                icon=folium.Icon(color="green", icon="plus-sign"),
-            ).add_to(m)
+    # Hospitales (si están disponibles)
+    for h in hospitals_list:
+        hlat = h.get("lat")
+        hlon = h.get("lon")
+        if None in (hlat, hlon):
+            continue
+        popup_html = _title_hospital_backend(h)
+        folium.CircleMarker(
+            location=[float(hlat), float(hlon)],
+            radius=6,
+            color="blue",
+            fill=True,
+            fill_color="blue",
+            popup=folium.Popup(popup_html, max_width=300),
+        ).add_to(m)
 
-        if ruta and ruta.get("success"):
-            # geometry: [[lon, lat], ...] → Folium: [lat, lon]
-            coords_folium = [[lat, lon] for lon, lat in ruta["geometry"]]
-            folium.PolyLine(
-                locations=coords_folium,
-                color="green",
-                weight=4,
-                opacity=0.8,
-                tooltip=f"Ruta real: {ruta['distance']:.2f} km, {ruta['duration']:.0f} min",
-            ).add_to(m)
-        elif ruta is not None and None not in (p_lat, p_lon, h_lat, h_lon):
-            # fallback línea recta
-            folium.PolyLine(
-                locations=[
-                    [float(p_lat), float(p_lon)],
-                    [float(h_lat), float(h_lon)],
-                ],
-                color="gray",
-                weight=3,
-                opacity=0.6,
-                dash_array="10",
-                tooltip="Línea recta (ruta real no disponible)",
-            ).add_to(m)
+    # Paciente
+    if None not in (p_lat, p_lon):
+        folium.Marker(
+            location=[float(p_lat), float(p_lon)],
+            popup=_title_paciente(patient_json),
+            icon=folium.Icon(color="red", icon="user"),
+        ).add_to(m)
 
-        st_folium(m, width=MAP_WIDTH, height=MAP_HEIGHT, key="map_backend_main")
+    # Hospital asignado + ruta
+    h_lat = hospital_json.get("lat")
+    h_lon = hospital_json.get("lon")
+
+    if None not in (h_lat, h_lon):
+        folium.Marker(
+            location=[float(h_lat), float(h_lon)],
+            popup=_title_hospital_backend(hospital_json),
+            icon=folium.Icon(color="green", icon="plus-sign"),
+        ).add_to(m)
+
+    if ruta and ruta.get("success"):
+        # geometry: [[lon, lat], ...] → Folium: [lat, lon]
+        coords_folium = [[lat, lon] for lon, lat in ruta["geometry"]]
+        folium.PolyLine(
+            locations=coords_folium,
+            color="green",
+            weight=4,
+            opacity=0.8,
+            tooltip=f"Ruta real: {ruta['distance']:.2f} km, {ruta['duration']:.0f} min",
+        ).add_to(m)
+    elif ruta is not None and None not in (p_lat, p_lon, h_lat, h_lon):
+        # fallback línea recta
+        folium.PolyLine(
+            locations=[
+                [float(p_lat), float(p_lon)],
+                [float(h_lat), float(h_lon)],
+            ],
+            color="gray",
+            weight=3,
+            opacity=0.6,
+            dash_array="10",
+            tooltip="Línea recta (ruta real no disponible)",
+        ).add_to(m)
+
+    st_folium(m, width=MAP_WIDTH, height=MAP_HEIGHT, key="map_backend_main")
+
+
+# ================================
+# MAIN UI
+# ================================
+def show_backend_dashboard():
+    st.header("Panel backend: grafos, asignación y rutas reales")
+
+    # 0) PROBAR CONEXIÓN Y CARGAR DATOS BÁSICOS
+    try:
+        patients_list = fetch_patients()
+    except Exception as e:
+        st.error(f"No se pudo conectar al backend en {API_BASE}.\n\nDetalle: {e}")
+        return
+
+    hospitals_list = fetch_hospitals()
+
+    if not patients_list:
+        st.warning("No hay pacientes en el backend.")
+        return
+
+    # 1) GRAFO
+    section_graph_visualization(patients_list, hospitals_list)
+
+    # 2) COMPARACIÓN DE GRAFOS
+    section_graph_comparison()
+
+    # 3) ASIGNACIÓN + ALGORITMOS
+    section_assignment_controls(patients_list)
+
+    # 4) DETALLE ÚLTIMA ASIGNACIÓN + MAPA
+    section_assignment_detail(hospitals_list)
