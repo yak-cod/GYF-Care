@@ -1,19 +1,19 @@
-# streamlit_app.py
+# streamlit_app.py - VERSIÓN REFACTORIZADA Y MODULAR
 import streamlit as st
-from infrastructure.data_loader import cargar_datos
-from infrastructure.graph_builder import GraphBuilder
-from application.assignment_service import AssignmentService
-from presentation import ui_assignment, ui_graph, ui_map
-from presentation.ui_backend_dashboard import show_backend_dashboard
 
+# Importar los módulos refactorizados
+from presentation import ui_routes, ui_graphs_optimized, ui_algorithms
 
 st.set_page_config(
-    page_title="GYF-Care",
+    page_title="GYF-Care - Sistema de Asignación",
+    page_icon="🏥",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="expanded",
 )
 
-# Estilo personalizado
+# ================================
+# ESTILO PERSONALIZADO
+# ================================
 st.markdown(
     """
 <style>
@@ -22,144 +22,80 @@ st.markdown(
         font-weight: bold;
         color: #1f77b4;
         text-align: center;
-        margin-bottom: 1rem;
+        margin-bottom: 0.5rem;
     }
     .subtitle {
         text-align: center;
         color: #666;
-        margin-bottom: 2rem;
+        margin-bottom: 1.5rem;
+    }
+    .module-header {
+        background: linear-gradient(90deg, #1f77b4 0%, #54a0ff 100%);
+        color: white;
+        padding: 1rem;
+        border-radius: 10px;
+        margin-bottom: 1rem;
     }
 </style>
 """,
     unsafe_allow_html=True,
 )
 
+# ================================
+# HEADER
+# ================================
+st.markdown('<div class="main-title">🏥 GYF-Care</div>', unsafe_allow_html=True)
 st.markdown(
-    '<div class="main-title">GYF-Care - Gestión de Asignación de Pacientes</div>',
+    '<div class="subtitle">Sistema Inteligente de Asignación de Pacientes con Algoritmos Avanzados</div>',
     unsafe_allow_html=True,
 )
-st.markdown(
-    '<div class="subtitle">Sistema inteligente de asignación con UFDS y rutas reales</div>',
-    unsafe_allow_html=True,
-)
 
-# ------------------------
-# Cargar datos iniciales (desde CSV, para el front local)
-# ------------------------
-@st.cache_data
-def load_initial_data():
-    """Carga los datos iniciales y los cachea para mejor performance."""
-    return cargar_datos("data/pacientesprueba.csv", "data/hospitalesprueba.csv")
-
-
-if "pacientes_df" not in st.session_state or "hosp_state" not in st.session_state:
-    with st.spinner("Cargando datos del sistema..."):
-        pacientes_df, hosp_state = load_initial_data()
-        st.session_state["pacientes_df"] = pacientes_df
-        st.session_state["hosp_state"] = hosp_state
-
-pacientes_df = st.session_state["pacientes_df"]
-hosp_state = st.session_state["hosp_state"]
-
-# ------------------------
-# Inicializar servicios (si los usas en otras partes del proyecto)
-# ------------------------
-if "graph_builder" not in st.session_state:
-    with st.spinner("Inicializando estructuras de grafos..."):
-        # Usar los datos originales para construir los grafos
-        _, hospitales_df_original = cargar_datos(
-            "data/pacientesprueba.csv", "data/hospitalesprueba.csv"
-        )
-        st.session_state["graph_builder"] = GraphBuilder(hospitales_df_original)
-
-if "assignment_service" not in st.session_state:
-    with st.spinner("Inicializando servicio de asignación..."):
-        _, hospitales_df_original = cargar_datos(
-            "data/pacientesprueba.csv", "data/hospitalesprueba.csv"
-        )
-        st.session_state["assignment_service"] = AssignmentService(
-            hospitales_df_original
-        )
-
-graph_builder = st.session_state["graph_builder"]
-assignment_service = st.session_state["assignment_service"]
-
-# ------------------------
-# Barra lateral con información
-# ------------------------
+# ================================
+# SIDEBAR - NAVEGACIÓN
+# ================================
 with st.sidebar:
     st.image(
         "https://w7.pngwing.com/pngs/870/305/png-transparent-peru-flag-thumbnail.png",
         width=80,
     )
-    st.markdown("### Estado del Sistema")
-
-    # Métricas generales
-    total_pacientes = len(pacientes_df)
-    total_hospitales = len(hosp_state)
-    camas_disponibles = int(hosp_state["Capacidad_Camas"].sum())
-
-    col1, col2 = st.columns(2)
-    with col1:
-        st.metric("Pacientes", total_pacientes)
-        st.metric("Hospitales", total_hospitales)
-    with col2:
-        st.metric("Camas", camas_disponibles)
-        departamentos = (
-            hosp_state["Departamento"].nunique()
-            if "Departamento" in hosp_state.columns
-            else 0
-        )
-        st.metric("Departamentos", departamentos)
-
-    st.divider()
-
-    # Menú de navegación
-    st.markdown("### Navegación")
+    
+    st.markdown("### 📱 Navegación")
+    
     menu = st.radio(
-        "Selecciona una vista:",
+        "Selecciona un módulo:",
         [
-            "Mapa Interactivo",
-            "Visualización de Grafos",
-            "Asignaciones",
-            "Algoritmos y Grafos (Backend)",  # 👈 NUEVA PESTAÑA
+            "🗺️ Rutas Reales (OpenRouteService)",
+            "🕸️ Visualización de Grafos",
+            "⚙️ Comparación de Algoritmos",
         ],
         label_visibility="collapsed",
     )
-
-    st.divider()
-
-# ------------------------
-# Contenido principal según menú aaa
-# ------------------------
-if menu == "Mapa Interactivo":
-    ui_map.show_map(pacientes_df, hosp_state)
-
-elif menu == "Visualización de Grafos":
-    # Nueva visualización interactiva usando los DataFrames reales
-    ui_graph.show_graph(
-        pacientes_df,
-        hosp_state,
+    
+    st.markdown("---")
+    
+    # Información del sistema
+    st.markdown("### 📊 Información")
+    st.info(
+        """
+        **Backend:** Conectado ✅  
+        **Base de Datos:** Azure MySQL  
+        **Pacientes:** ~1,400  
+        **Hospitales:** ~28
+        """
     )
+    
+    st.markdown("---")
+    st.caption("© 2025 GYF-Care Team | TB2")
 
-elif menu == "Asignaciones":
-    ui_assignment.show_assignment(pacientes_df, hosp_state)
+# ================================
+# CONTENIDO PRINCIPAL
+# ================================
 
-elif menu == "Algoritmos y Grafos (Backend)":
-    # Panel que consume tu backend Flask vía /api/*
-    show_backend_dashboard()
+if menu == "🗺️ Rutas Reales (OpenRouteService)":
+    ui_routes.show_routes_module()
 
+elif menu == "🕸️ Visualización de Grafos":
+    ui_graphs_optimized.show_graphs_module()
 
-# ------------------------
-# Footer
-# ------------------------
-st.divider()
-st.markdown(
-    """
-<div style="text-align: center; color: #888; padding: 1rem;">
-    <small>GYF-Care v1.0 | Gestión Inteligente de Asignación Hospitalaria | 2025</small>
-</div>
-""",
-    unsafe_allow_html=True,
-)
-
+elif menu == "⚙️ Comparación de Algoritmos":
+    ui_algorithms.show_algorithms_module()
