@@ -493,156 +493,262 @@ def show_graphs_module():
                         st_folium(map_after, width=500, height=500, key="failure_after")
     
     # ================================
-    # TAB 4: SIMULADOR EN VIVO
+    # TAB 4: SIMULADOR DE CONEXIÓN
     # ================================
     with tabs[3]:
-        st.subheader("🚑 Simulador de Asignación en Vivo")
-        st.markdown("Simula la llegada de pacientes en tiempo real y su asignación a hospitales.")
+        st.subheader("🎯 Simulador: Cómo se conecta un Paciente al Grafo")
+        st.markdown("Visualiza paso a paso cómo un paciente se conecta a la red según el algoritmo seleccionado.")
         
-        # Controles
-        col1, col2, col3 = st.columns([2, 2, 1])
+        # Configuración del simulador
+        col1, col2 = st.columns([3, 2])
         
         with col1:
-            simulation_speed = st.slider("Velocidad (pacientes/seg):", 1, 10, 3, key="sim_speed")
-        
-        with col2:
-            max_patients = st.slider("Pacientes a generar:", 5, 50, 20, key="sim_max")
-        
-        with col3:
-            if "simulation_running" not in st.session_state:
-                st.session_state["simulation_running"] = False
-            
-            if st.button("▶️ Iniciar" if not st.session_state["simulation_running"] else "⏸️ Pausar", 
-                        use_container_width=True, 
-                        key="sim_toggle"):
-                st.session_state["simulation_running"] = not st.session_state["simulation_running"]
-                if st.session_state["simulation_running"]:
-                    st.session_state["sim_patients_processed"] = 0
-                    st.session_state["sim_assignments"] = []
-                st.rerun()
-        
-        # Estado de simulación
-        if "simulation_running" in st.session_state and st.session_state["simulation_running"]:
-            st.info("🟢 Simulación en curso...")
-            
-            # Obtener hospitales disponibles
+            # Obtener lista de pacientes
             try:
-                response = requests.get(f"{BACKEND_URL}/hospitals", timeout=10)
-                hospitals = response.json()["hospitals"]
+                response = requests.get(f"{BACKEND_URL}/patients", params={"limit": 100}, timeout=10)
+                patients_data = response.json()
+                patients_list = patients_data.get("patients", [])
                 
-                # Simular llegada de paciente
-                if "sim_patients_processed" not in st.session_state:
-                    st.session_state["sim_patients_processed"] = 0
-                
-                if st.session_state["sim_patients_processed"] < max_patients:
-                    # Generar paciente aleatorio
-                    random_hospital = random.choice(hospitals)
-                    
-                    # Crear "paciente" cerca de un hospital aleatorio
-                    fake_patient = {
-                        "id": f"SIM_{st.session_state['sim_patients_processed']:03d}",
-                        "lat": random_hospital["lat"] + random.uniform(-0.5, 0.5),
-                        "lon": random_hospital["lon"] + random.uniform(-0.5, 0.5),
-                        "type": "patient"
+                if patients_list:
+                    patient_options = {
+                        f"{p['code']} - {p.get('disease', 'N/A')[:30]} ({p.get('department', 'N/A')})": p['code']
+                        for p in patients_list
                     }
                     
-                    # Asignar al hospital más cercano (simplificado)
-                    distances = []
-                    for h in hospitals[:10]:  # Limitar a 10 para performance
-                        dist = ((fake_patient["lat"] - h["lat"])**2 + (fake_patient["lon"] - h["lon"])**2)**0.5
-                        distances.append((h, dist))
-                    
-                    distances.sort(key=lambda x: x[1])
-                    assigned_hospital = distances[0][0]
-                    
-                    # Guardar asignación
-                    if "sim_assignments" not in st.session_state:
-                        st.session_state["sim_assignments"] = []
-                    
-                    st.session_state["sim_assignments"].append({
-                        "patient": fake_patient,
-                        "hospital": assigned_hospital,
-                        "distance": distances[0][1] * 111  # Aproximar a km
-                    })
-                    
-                    st.session_state["sim_patients_processed"] += 1
-                    
-                    # Esperar según velocidad
-                    time.sleep(1.0 / simulation_speed)
-                    st.rerun()
+                    selected_patient_label = st.selectbox(
+                        "Selecciona un paciente:",
+                        list(patient_options.keys()),
+                        key="sim_patient_select"
+                    )
+                    selected_patient_code = patient_options[selected_patient_label]
                 else:
-                    st.session_state["simulation_running"] = False
-                    st.success(f"✅ Simulación completada: {max_patients} pacientes procesados")
-            
+                    st.error("No se pudieron cargar pacientes")
+                    selected_patient_code = None
             except Exception as e:
-                st.error(f"Error en simulación: {e}")
-                st.session_state["simulation_running"] = False
+                st.error(f"Error al cargar pacientes: {e}")
+                selected_patient_code = None
         
-        # Mostrar resultados
-        if "sim_assignments" in st.session_state and st.session_state["sim_assignments"]:
-            assignments = st.session_state["sim_assignments"]
+        with col2:
+            # Tipo de grafo para la simulación
+            sim_graph_type = st.selectbox(
+                "Tipo de grafo:",
+                ["knn", "radius", "bipartite"],
+                format_func=lambda x: {
+                    "knn": "KNN",
+                    "radius": "Radio",
+                    "bipartite": "Bipartito"
+                }[x],
+                key="sim_graph_type"
+            )
             
-            st.divider()
-            st.subheader("📊 Estadísticas de Simulación")
+            # Parámetros según el tipo
+            if sim_graph_type == "knn":
+                sim_k = st.slider("K vecinos:", 1, 10, 5, key="sim_k")
+                sim_params = {"k": sim_k, "limit": 200}
+            elif sim_graph_type == "radius":
+                sim_radius = st.slider("Radio (km):", 10.0, 150.0, 50.0, 10.0, key="sim_radius")
+                sim_params = {"radius_km": sim_radius, "limit": 200}
+            else:
+                sim_k_bip = st.slider("K hospitales:", 1, 10, 3, key="sim_k_bip")
+                sim_params = {"k": sim_k_bip, "limit": 200}
+        
+        # Botón para ejecutar simulación
+        if selected_patient_code and st.button("🔍 Simular Conexión del Paciente", type="primary", use_container_width=True, key="sim_run"):
+            with st.spinner("Generando grafo y calculando conexiones..."):
+                # 1. Obtener grafo completo
+                graph_data = fetch_graph(sim_graph_type, **sim_params)
+                
+                # 2. Obtener datos del paciente seleccionado
+                selected_patient = next((p for p in patients_list if p['code'] == selected_patient_code), None)
+                
+                if graph_data and selected_patient:
+                    # Guardar en session_state con claves diferentes
+                    st.session_state["sim_result_graph"] = graph_data
+                    st.session_state["sim_result_patient"] = selected_patient
+                    st.session_state["sim_result_graph_type"] = sim_graph_type
+                    st.session_state["sim_result_params"] = sim_params
+                    st.rerun()
+        
+        # Mostrar resultados de la simulación
+        if "sim_result_graph" in st.session_state and "sim_result_patient" in st.session_state:
+            graph_data = st.session_state["sim_result_graph"]
+            patient = st.session_state["sim_result_patient"]
+            graph_type = st.session_state["sim_result_graph_type"]
+            params = st.session_state["sim_result_params"]
+            
+            st.success(f"✅ Simulación generada para paciente **{patient['code']}**")
+            
+            # Encontrar conexiones del paciente en el grafo
+            patient_edges = [e for e in graph_data["edges"] if e["from"] == patient["code"]]
+            
+            # Información del algoritmo
+            st.info(f"**Algoritmo:** {graph_data.get('algorithm', 'N/A')} | **Parámetros:** {params}")
+            
+            # Métricas de conexión
+            st.subheader("📊 Análisis de Conexiones")
             
             col1, col2, col3 = st.columns(3)
-            col1.metric("Pacientes procesados", len(assignments))
-            col2.metric("Distancia promedio", f"{sum(a['distance'] for a in assignments) / len(assignments):.2f} km")
             
-            # Contar hospitales únicos usados
-            unique_hospitals = len(set(a["hospital"]["code"] for a in assignments))
-            col3.metric("Hospitales utilizados", unique_hospitals)
+            with col1:
+                st.metric("Conexiones del paciente", len(patient_edges))
             
-            # Mapa de asignaciones
-            st.subheader("🗺️ Mapa de Asignaciones en Vivo")
+            with col2:
+                if patient_edges:
+                    avg_distance = sum(e["weight"] for e in patient_edges) / len(patient_edges)
+                    st.metric("Distancia promedio", f"{avg_distance:.2f} km")
+                else:
+                    st.metric("Distancia promedio", "N/A")
             
-            m = folium.Map(location=[-9.19, -75.01], zoom_start=6)
+            with col3:
+                if patient_edges:
+                    min_distance = min(e["weight"] for e in patient_edges)
+                    st.metric("Hospital más cercano", f"{min_distance:.2f} km")
+                else:
+                    st.metric("Hospital más cercano", "N/A")
             
-            colors = ["red", "blue", "green", "purple", "orange", "darkred", "lightred", "darkblue", "cadetblue", "darkgreen"]
-            
-            for idx, assignment in enumerate(assignments[-20:]):  # Últimas 20
-                patient = assignment["patient"]
-                hospital = assignment["hospital"]
-                color = colors[idx % len(colors)]
+            # Tabla de conexiones
+            if patient_edges:
+                st.subheader("🔗 Conexiones Detectadas")
                 
-                # Paciente
-                folium.CircleMarker(
+                connections_df = pd.DataFrame([{
+                    "Nodo Destino": e["to"],
+                    "Distancia (km)": f"{e['weight']:.2f}",
+                    "Tipo": "Hospital" if e["to"].startswith("H") else "Otro"
+                } for e in patient_edges])
+                
+                st.dataframe(connections_df, use_container_width=True)
+            else:
+                st.warning("⚠️ Este paciente no tiene conexiones en el grafo generado. Intenta con otros parámetros.")
+            
+            # Visualización en mapa
+            st.divider()
+            st.subheader("🗺️ Visualización de Conexiones en el Mapa")
+            
+            # Crear mapa centrado en el paciente
+            m = folium.Map(
+                location=[patient["lat"], patient["lon"]],
+                zoom_start=8
+            )
+            
+            # Nodos del grafo (solo cercanos al paciente para no saturar)
+            nodes_dict = {n["id"]: n for n in graph_data["nodes"]}
+            
+            # Dibujar aristas del grafo (opacidad baja)
+            for edge in graph_data["edges"][:500]:  # Limitar para performance
+                from_node = nodes_dict.get(edge["from"])
+                to_node = nodes_dict.get(edge["to"])
+                
+                if from_node and to_node:
+                    folium.PolyLine(
+                        locations=[
+                            [from_node["lat"], from_node["lon"]],
+                            [to_node["lat"], to_node["lon"]]
+                        ],
+                        color="#95a5a6",
+                        weight=1,
+                        opacity=0.1
+                    ).add_to(m)
+            
+            # Dibujar CONEXIONES DEL PACIENTE SELECCIONADO (destacadas)
+            for edge in patient_edges:
+                to_node = nodes_dict.get(edge["to"])
+                
+                if to_node:
+                    # Línea gruesa y visible
+                    folium.PolyLine(
+                        locations=[
+                            [patient["lat"], patient["lon"]],
+                            [to_node["lat"], to_node["lon"]]
+                        ],
+                        color="#27AE60",  # Verde brillante
+                        weight=3,
+                        opacity=0.8,
+                        tooltip=f"Distancia: {edge['weight']:.2f} km"
+                    ).add_to(m)
+                    
+                    # Marcador del nodo conectado
+                    folium.CircleMarker(
+                        location=[to_node["lat"], to_node["lon"]],
+                        radius=6,
+                        color="#3498DB",
+                        fill=True,
+                        fillColor="#3498DB",
+                        fillOpacity=0.8,
+                        popup=f"<b>{to_node['id']}</b><br>Distancia: {edge['weight']:.2f} km",
+                        tooltip=f"🏥 {to_node['id']}"
+                    ).add_to(m)
+            
+            # Marcador del PACIENTE (grande y destacado)
+            folium.Marker(
+                location=[patient["lat"], patient["lon"]],
+                popup=f"<b>PACIENTE:</b> {patient['code']}<br><b>Enfermedad:</b> {patient.get('disease', 'N/A')}<br><b>Departamento:</b> {patient.get('department', 'N/A')}",
+                icon=folium.Icon(color="red", icon="user", prefix="fa"),
+                tooltip=f"👤 {patient['code']} (SELECCIONADO)"
+            ).add_to(m)
+            
+            # Agregar círculo de radio si es grafo de radio
+            if graph_type == "radius":
+                folium.Circle(
                     location=[patient["lat"], patient["lon"]],
-                    radius=4,
-                    color=color,
-                    fill=True,
-                    fillColor=color,
-                    fillOpacity=0.6,
-                    tooltip=patient["id"]
-                ).add_to(m)
-                
-                # Hospital
-                folium.CircleMarker(
-                    location=[hospital["lat"], hospital["lon"]],
-                    radius=6,
-                    color="blue",
-                    fill=True,
-                    fillColor="lightblue",
-                    fillOpacity=0.8,
-                    tooltip=hospital["code"]
-                ).add_to(m)
-                
-                # Línea de asignación
-                folium.PolyLine(
-                    locations=[[patient["lat"], patient["lon"]], [hospital["lat"], hospital["lon"]]],
-                    color=color,
+                    radius=params.get("radius_km", 50) * 1000,  # a metros
+                    color="#E74C3C",
+                    fill=False,
                     weight=2,
-                    opacity=0.5
+                    opacity=0.5,
+                    tooltip=f"Radio: {params.get('radius_km', 50)} km"
                 ).add_to(m)
             
-            st_folium(m, width=1100, height=600, key="simulation_map")
+            st_folium(m, width=1100, height=650, key="simulation_connection_map")
             
-            # Tabla de asignaciones
-            st.subheader("📋 Detalle de Asignaciones")
-            summary = pd.DataFrame([{
-                "Paciente": a["patient"]["id"],
-                "Hospital": a["hospital"]["code"],
-                "Distancia (km)": f"{a['distance']:.2f}"
-            } for a in assignments[-20:]])
+            # Explicación del algoritmo
+            st.divider()
+            st.subheader("💡 Explicación del Algoritmo")
             
-            st.dataframe(summary, use_container_width=True)
+            if graph_type == "knn":
+                st.markdown(f"""
+                **Algoritmo KNN (K-Nearest Neighbors) con K={params.get('k', 5)}**
+                
+                1. Se calculan las distancias del paciente **{patient['code']}** a TODOS los nodos del grafo
+                2. Se seleccionan los **{params.get('k', 5)} nodos más cercanos**
+                3. Se crean aristas entre el paciente y esos {params.get('k', 5)} nodos
+                4. El peso de cada arista es la distancia geográfica en km
+                
+                ✅ En el mapa: Las **líneas verdes** muestran las {len(patient_edges)} conexiones creadas
+                """)
+            
+            elif graph_type == "radius":
+                st.markdown(f"""
+                **Algoritmo de Radio (ε-vecindario) con Radio={params.get('radius_km', 50)} km**
+                
+                1. Se define un radio de **{params.get('radius_km', 50)} km** alrededor del paciente **{patient['code']}**
+                2. Se conecta con TODOS los nodos dentro de ese radio
+                3. El círculo rojo en el mapa muestra la zona de búsqueda
+                4. Solo se crean aristas si la distancia ≤ {params.get('radius_km', 50)} km
+                
+                ✅ En el mapa: Las **líneas verdes** muestran las {len(patient_edges)} conexiones dentro del radio
+                """)
+            
+            else:  # bipartite
+                st.markdown(f"""
+                **Algoritmo Bipartito KNN con K={params.get('k', 3)}**
+                
+                1. Este algoritmo solo conecta **pacientes → hospitales** (grafo bipartito)
+                2. El paciente **{patient['code']}** se conecta a los **{params.get('k', 3)} hospitales más cercanos**
+                3. NO hay conexiones paciente-paciente ni hospital-hospital
+                4. Es el más eficiente para asignación directa
+                
+                ✅ En el mapa: Las **líneas verdes** muestran las {len(patient_edges)} conexiones a hospitales
+                """)
+            
+            # Comparación con otros algoritmos
+            with st.expander("📊 ¿Cómo se compara con otros algoritmos?"):
+                st.markdown("""
+                | Algoritmo | Ventajas | Desventajas |
+                |-----------|----------|-------------|
+                | **KNN** | Garantiza K conexiones, balanceado | Puede conectar nodos lejanos si no hay cercanos |
+                | **Radio** | Solo conecta nodos cercanos, eficiente | Puede dejar nodos sin conexiones |
+                | **Bipartito** | Directo, solo pac→hosp, rápido | No considera rutas indirectas |
+                """)
+        
+        else:
+            st.info("👆 Selecciona un paciente y presiona **Simular Conexión** para ver cómo se conecta al grafo")
