@@ -6,7 +6,7 @@ from pyvis.network import Network
 import folium
 from streamlit_folium import st_folium
 
-BACKEND_URL = st.secrets.get("BACKEND_URL", "http://localhost:5000/api")
+from shared.config import BACKEND_URL
 
 # ================================
 # FUNCIONES AUXILIARES
@@ -16,7 +16,7 @@ def fetch_graph(graph_type, **params):
     """Obtiene un grafo del backend."""
     try:
         response = requests.get(
-            f"{BACKEND_URL}/graph/{graph_type}",
+            f"{BACKEND_URL}/api/graph/{graph_type}",
             params=params,
             timeout=30
         )
