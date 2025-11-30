@@ -1,10 +1,12 @@
 # presentation/__init__.py
 """
-Módulos de presentación para GYF-Care
+Módulo de presentación - Interfaz de usuario con Streamlit
 """
 
-from . import ui_routes
-from . import ui_graphs_optimized
-from . import ui_algorithms
+from .ui_routes import show_routes_module
+from .ui_graphs_optimized import show_graphs_module
 
-__all__ = ["ui_routes", "ui_graphs_optimized", "ui_algorithms"]
+__all__ = [
+    'show_routes_module',
+    'show_graphs_module',
+]
