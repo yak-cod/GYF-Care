@@ -9,7 +9,7 @@ import plotly.express as px
 from infrastructure.route_service import RouteService
 from shared.config import MAP_WIDTH, MAP_HEIGHT
 
-BACKEND_URL = st.secrets.get("BACKEND_URL", "http://localhost:5000/api")
+from shared.config import BACKEND_URL
 
 # ================================
 # FUNCIONES AUXILIARES
@@ -19,7 +19,7 @@ BACKEND_URL = st.secrets.get("BACKEND_URL", "http://localhost:5000/api")
 def fetch_patients():
     """Obtiene pacientes del backend."""
     try:
-        response = requests.get(f"{BACKEND_URL}/patients", params={"limit": 1000}, timeout=10)
+        response = requests.get(f"{BACKEND_URL}/api/patients", params={"limit": 1000}, timeout=10)
         response.raise_for_status()
         data = response.json()
         return pd.DataFrame(data["patients"])
@@ -32,7 +32,7 @@ def fetch_patients():
 def fetch_hospitals():
     """Obtiene hospitales del backend."""
     try:
-        response = requests.get(f"{BACKEND_URL}/hospitals", timeout=10)
+        response = requests.get(f"{BACKEND_URL}/api/hospitals", timeout=10)
         response.raise_for_status()
         data = response.json()
         return pd.DataFrame(data["hospitals"])
@@ -45,7 +45,7 @@ def assign_best_hospital(patient_code: str):
     """Asigna el mejor hospital a un paciente usando el backend."""
     try:
         response = requests.post(
-            f"{BACKEND_URL}/assign/patient-best",
+            f"{BACKEND_URL}/api/assign/patient-best",
             json={"patient_code": patient_code},
             timeout=30
         )
@@ -60,7 +60,7 @@ def compare_algorithms_for_patient(patient_code: str):
     """Compara todos los algoritmos para un paciente."""
     try:
         response = requests.post(
-            f"{BACKEND_URL}/assign/compare-patient",
+            f"{BACKEND_URL}/api/assign/compare-patient",
             json={"patient_code": patient_code},
             timeout=60
         )
