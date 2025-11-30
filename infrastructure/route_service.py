@@ -1,7 +1,7 @@
+# application/route_service.py
 import requests
 import time
 import json
-import os
 from typing import Optional, Dict, List, Tuple
 from pathlib import Path
 
@@ -25,9 +25,16 @@ class RouteService:
         if ENABLE_ROUTE_CACHE:
             self.cache_dir.mkdir(exist_ok=True)
 
-    def _get_cache_path(self, start_coords: Tuple[float, float], end_coords: Tuple[float, float]) -> Path:
-        """Genera path del archivo de caché para una ruta."""
-        cache_key = f"{start_coords[0]:.6f}_{start_coords[1]:.6f}_to_{end_coords[0]:.6f}_{end_coords[1]:.6f}"
+    def _get_cache_path(
+        self,
+        start_coords: Tuple[float, float],
+        end_coords: Tuple[float, float],
+    ) -> Path:
+        """Genera el path del archivo de caché para una ruta."""
+        cache_key = (
+            f"{start_coords[0]:.6f}_{start_coords[1]:.6f}_"
+            f"to_{end_coords[0]:.6f}_{end_coords[1]:.6f}"
+        )
         return self.cache_dir / f"route_{cache_key}.json"
 
     def _load_from_cache(self, cache_path: Path) -> Optional[Dict]:
@@ -35,19 +42,20 @@ class RouteService:
         if not ENABLE_ROUTE_CACHE or not cache_path.exists():
             return None
         try:
-            with open(cache_path, "r") as f:
+            with open(cache_path, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception:
             return None
 
-    def _save_to_cache(self, cache_path: Path, data: Dict):
+    def _save_to_cache(self, cache_path: Path, data: Dict) -> None:
         """Guarda ruta en caché."""
         if not ENABLE_ROUTE_CACHE:
             return
         try:
-            with open(cache_path, "w") as f:
+            with open(cache_path, "w", encoding="utf-8") as f:
                 json.dump(data, f)
         except Exception:
+            # Si falla la caché, no rompemos el flujo principal
             pass
 
     def get_route(
@@ -59,40 +67,36 @@ class RouteService:
     ) -> Optional[Dict]:
         """
         Obtiene ruta entre dos puntos usando ORS API.
-        
-        Args:
-            start_lat: Latitud de inicio
-            start_lon: Longitud de inicio
-            end_lat: Latitud de destino
-            end_lon: Longitud de destino
-            
+
         Returns:
             Dict con:
-                - geometry: Lista de coordenadas [[lon, lat], ...] para Folium
-                - distance: Distancia en kilómetros
-                - duration: Duración en minutos
+                - geometry: Lista de coordenadas [[lon, lat], ...] (formato ORS)
+                - distance: Distancia en kilómetros (float)
+                - duration: Duración en minutos (float)
                 - success: bool
-                - error: str (si hay error)
+                - error/details si falla
         """
         start_coords = (start_lat, start_lon)
         end_coords = (end_lat, end_lon)
-        
-        # Verificar caché
+
+        # 1) Verificar caché
         cache_path = self._get_cache_path(start_coords, end_coords)
         cached_data = self._load_from_cache(cache_path)
         if cached_data:
             return cached_data
 
-        # Formato ORS: coordinates son [lon, lat] (no lat, lon)
+        # Formato ORS: coordinates = [[lon, lat], [lon, lat]]
         coordinates = [[start_lon, start_lat], [end_lon, end_lat]]
-        
+
         headers = {
             "Authorization": self.api_key,
             "Content-Type": "application/json",
         }
-        
+
+        # radiuses: permite buscar una vía hasta 1000 m alrededor de cada punto
         body = {
             "coordinates": coordinates,
+            "radiuses": [1000, 1000],
         }
 
         for attempt in range(ORS_MAX_RETRIES):
@@ -103,85 +107,88 @@ class RouteService:
                     headers=headers,
                     timeout=ORS_TIMEOUT,
                 )
-                
+
                 if response.status_code == 200:
                     data = response.json()
-                    
-                    # ORS puede responder en dos formatos: GeoJSON o JSON estándar
-                    # Intentar formato GeoJSON primero
+
+                    # Formato GeoJSON
                     if "features" in data and len(data["features"]) > 0:
                         feature = data["features"][0]
                         geometry = feature["geometry"]["coordinates"]
-                        properties = feature["properties"]["segments"][0]
-                        
+                        segments = feature["properties"].get("segments", [])
+                        if not segments:
+                            return {
+                                "success": False,
+                                "error": "No segments in GeoJSON response",
+                                "details": data,
+                            }
+                        properties = segments[0]
+
                         result = {
                             "geometry": geometry,  # [[lon, lat], ...]
-                            "distance": properties["distance"] / 1000,  # convertir m a km
-                            "duration": properties["duration"] / 60,  # convertir s a min
+                            "distance": properties.get("distance", 0) / 1000.0,
+                            "duration": properties.get("duration", 0) / 60.0,
                             "success": True,
                         }
-                        
-                        # Guardar en caché
+
                         self._save_to_cache(cache_path, result)
                         return result
-                    
-                    # Intentar formato JSON estándar
+
+                    # Formato JSON estándar (no GeoJSON)
                     elif "routes" in data and len(data["routes"]) > 0:
                         route = data["routes"][0]
-                        
-                        # Decodificar geometría encoded polyline
-                        import polyline
+
+                        geometry = None
+                        # Si viene polilínea codificada
                         geometry_encoded = route.get("geometry", "")
-                        
-                        # Si la geometría está encoded, decodificarla
                         if geometry_encoded and isinstance(geometry_encoded, str):
-                            # polyline devuelve [(lat, lon), ...], necesitamos [[lon, lat], ...]
+                            import polyline
+
                             decoded = polyline.decode(geometry_encoded)
+                            # polyline → [(lat, lon), ...] → convertimos a [[lon, lat], ...]
                             geometry = [[lon, lat] for lat, lon in decoded]
                         else:
-                            # Si no está encoded, puede estar en route['segments'][0]['geometry']
-                            geometry = None
-                            if "segments" in route and len(route["segments"]) > 0:
-                                segment = route["segments"][0]
-                                if "geometry" in segment:
-                                    geometry = segment["geometry"]
-                        
+                            # Segments con geometry explícita
+                            segments = route.get("segments") or []
+                            if segments and "geometry" in segments[0]:
+                                geometry = segments[0]["geometry"]
+
                         if not geometry:
                             return {
                                 "success": False,
                                 "error": "No geometry found in response",
-                                "details": f"Response: {data}",
+                                "details": data,
                             }
-                        
+
                         summary = route.get("summary", {})
-                        
                         result = {
                             "geometry": geometry,
-                            "distance": summary.get("distance", 0) / 1000,  # m a km
-                            "duration": summary.get("duration", 0) / 60,  # s a min
+                            "distance": summary.get("distance", 0) / 1000.0,
+                            "duration": summary.get("duration", 0) / 60.0,
                             "success": True,
                         }
-                        
-                        # Guardar en caché
+
                         self._save_to_cache(cache_path, result)
                         return result
-                    
+
                     else:
                         return {
                             "success": False,
                             "error": "No route found in response",
-                            "details": f"Response: {data}",
+                            "details": data,
                         }
-                
-                elif response.status_code == 429:  # Rate limit
+
+                # Rate limit
+                elif response.status_code == 429:
                     if attempt < ORS_MAX_RETRIES - 1:
-                        time.sleep(2 ** attempt)  # exponential backoff
+                        time.sleep(2 ** attempt)  # backoff exponencial
                         continue
                     return {
                         "success": False,
                         "error": "Rate limit exceeded. Try again later.",
+                        "details": response.text,
                     }
-                
+
                 else:
                     error_detail = response.text if response.text else f"Status {response.status_code}"
                     return {
@@ -189,7 +196,7 @@ class RouteService:
                         "error": f"API error: {response.status_code}",
                         "details": error_detail,
                     }
-                    
+
             except requests.Timeout:
                 if attempt < ORS_MAX_RETRIES - 1:
                     continue
@@ -204,7 +211,7 @@ class RouteService:
                     "success": False,
                     "error": f"Unexpected error: {str(e)}",
                 }
-        
+
         return {
             "success": False,
             "error": "Max retries exceeded",
@@ -217,18 +224,23 @@ class RouteService:
     ) -> List[Optional[Dict]]:
         """
         Obtiene múltiples rutas. Útil para calcular varias rutas a la vez.
-        
+
         Args:
-            origins: Lista de (lat, lon) de origen
-            destinations: Lista de (lat, lon) de destino
-            
+            origins: lista de (lat, lon)
+            destinations: lista de (lat, lon)
+
         Returns:
-            Lista de resultados (uno por cada par origin-destination)
+            Lista de dicts de resultado, uno por cada par origen–destino.
         """
-        results = []
+        results: List[Optional[Dict]] = []
         for origin, destination in zip(origins, destinations):
-            route = self.get_route(origin[0], origin[1], destination[0], destination[1])
+            route = self.get_route(
+                start_lat=origin[0],
+                start_lon=origin[1],
+                end_lat=destination[0],
+                end_lon=destination[1],
+            )
             results.append(route)
-            # Pequeña pausa para no saturar la API
+            # pequeña pausa para no saturar la API
             time.sleep(0.1)
         return results

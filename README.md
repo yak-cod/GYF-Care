@@ -32,3 +32,4 @@ Aplicación de demo para asignación inteligente de pacientes a hospitales usand
 ## Run:
 
 `streamlit run streamlit_app.py`
+`python -m streamlit run streamlit_app.py`
