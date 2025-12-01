@@ -1,0 +1,22 @@
+# Core
+streamlit==1.51.0
+pandas==2.3.3
+numpy==2.3.5
+
+# Mapas y visualización
+folium==0.20.0
+streamlit-folium==0.25.3
+pyvis==0.3.2
+plotly==6.5.0
+
+# API y HTTP
+requests==2.32.5
+python-dotenv==1.2.1
+
+# Geometría y rutas
+haversine==2.9.0
+polyline==2.0.3
+
+# Redes y grafos
+networkx==3.5
+matplotlib==3.10.7
