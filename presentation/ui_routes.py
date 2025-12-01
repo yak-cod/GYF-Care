@@ -215,21 +215,40 @@ def show_routes_module():
             
             # Obtener ruta real
             route_service = RouteService()
-            
-            with st.status("Calculando ruta real...", expanded=False) as status:
-                route_data = route_service.get_route(
-                    patient["lat"], patient["lon"],
-                    hospital["lat"], hospital["lon"]
-                )
-                status.update(label="Ruta calculada", state="complete")
+
+            with st.status("Calculando ruta real...", expanded=True) as status:  # ← expanded=True para ver detalles
+                try:
+                    route_data = route_service.get_route(
+                        patient["lat"], patient["lon"],
+                        hospital["lat"], hospital["lon"]
+                    )
+                    
+                    # ✅ MOSTRAR QUÉ DEVOLVIÓ ORS
+                    st.write("🔍 **Debug - Respuesta de ORS:**")
+                    st.json(route_data)
+                    
+                    if route_data and route_data.get("success"):
+                        status.update(label="✅ Ruta calculada con éxito", state="complete")
+                    else:
+                        status.update(label="⚠️ ORS falló, usando línea recta", state="error")
+                        
+                except Exception as e:
+                    st.error(f"❌ Error al calcular ruta: {e}")
+                    route_data = None
+                    status.update(label="❌ Error", state="error")
             
             if route_data and route_data.get("success") and "geometry" in route_data:
                 route_coords = [[lat, lon] for lon, lat in route_data["geometry"]]
                 distance_real = route_data.get("distance", 0)
                 duration = route_data.get("duration", 0)
-                st.info(f"Ruta real: {distance_real:.2f} km | {duration:.0f} min")
+                st.success(f"✅ Ruta real calculada: {distance_real:.2f} km | {duration:.0f} min")
             else:
                 route_coords = None
+                if route_data:
+                    st.warning(f"⚠️ ORS no pudo calcular ruta. Error: {route_data.get('error', 'Desconocido')}")
+                    st.info(f"📏 Usando distancia en línea recta: {distance:.2f} km")
+                else:
+                    st.warning("⚠️ No se pudo calcular ruta. Usando línea recta.")
             
             # Mapa
             st.divider()
